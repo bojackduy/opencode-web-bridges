@@ -27,7 +27,7 @@ describe("applyChatGPTConfig fills missing entries", () => {
     const entry = buildProviderEntry("http://127.0.0.1:8788/v1") as any
     expect(entry.name).toBe("ChatGPT Web (browser tool bridge)")
     expect(entry.npm).toBe("@ai-sdk/openai-compatible")
-    expect(entry.options).toEqual({ baseURL: "http://127.0.0.1:8788/v1", chunkTimeout: false, timeout: false })
+    expect(entry.options).toEqual({ baseURL: "http://127.0.0.1:8788/v1", headerTimeout: false, chunkTimeout: false, timeout: false })
     const model = entry.models[MODEL_ID]
     expect(model.name).toBe("ChatGPT Web")
     expect(model.tool_call).toBe(true)

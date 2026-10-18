@@ -17,7 +17,7 @@ export function buildProviderEntry(adapterBaseURL: string): Record<string, unkno
   return {
     name: "ChatGPT Web (browser tool bridge)",
     npm: "@ai-sdk/openai-compatible",
-    options: { baseURL: adapterBaseURL, chunkTimeout: false, timeout: false },
+    options: { baseURL: adapterBaseURL, headerTimeout: false, chunkTimeout: false, timeout: false },
     models: {
       [MODEL_ID]: {
         name: "ChatGPT Web",

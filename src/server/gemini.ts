@@ -38,7 +38,7 @@ export function applyGeminiConfig(cfg: Record<string, any>, o: GeminiOptions): v
   cfg.provider ??= {}
   cfg.provider["gemini-web"] ??= {
     npm: "@ai-sdk/openai-compatible", name: "Gemini Web",
-    options: { baseURL: o.adapterBaseURL, timeout: false },
+    options: { baseURL: o.adapterBaseURL, headerTimeout: false, chunkTimeout: false, timeout: false },
     models: { "gemini-web": { name: "Gemini Web", tool_call: true, modalities: { input: ["text"], output: ["text"] }, limit: { context: 0, output: 32768 } } },
   }
   cfg.mcp ??= {}
@@ -47,7 +47,7 @@ export function applyGeminiConfig(cfg: Record<string, any>, o: GeminiOptions): v
 
 export function registerGeminiV2Provider(editor: V2ProviderTarget, o: GeminiOptions): void {
   if (editor.get("gemini-web")) return
-  const info: Provider.Info = { id: "gemini-web" as Provider.ID, name: "Gemini Web", activation: "enabled", package: "@opencode/ai/providers/openai-compatible", settings: { baseURL: o.adapterBaseURL, timeout: false } }
+  const info: Provider.Info = { id: "gemini-web" as Provider.ID, name: "Gemini Web", activation: "enabled", package: "@opencode/ai/providers/openai-compatible", settings: { baseURL: o.adapterBaseURL, headerTimeout: false, chunkTimeout: false, timeout: false } }
   const model: Model.Info = { id: "gemini-web" as Model.ID, modelID: "gemini-web" as Model.ID, providerID: "gemini-web" as Provider.ID, name: "Gemini Web", capabilities: { tools: true, input: ["text"], output: ["text"] }, variants: [], time: { released: 0 }, cost: [], status: "active", enabled: true, limit: { context: 0, output: 32768 } }
   editor.add({ info, models: [model] })
 }

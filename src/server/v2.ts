@@ -33,9 +33,9 @@ export const COMMAND_NAMES = [COMMAND_STATUS, COMMAND_LOGIN, COMMAND_DOCTOR] as 
 /**
  * v2 provider source definition. Mirrors buildProviderEntry() from
  * config-shape.ts: display name + baseURL survive 1:1; `npm` becomes the v2
- * `package` runtime; `timeout: false` carries over (never time out long
- * ChatGPT streams). `chunkTimeout: false` has no v2 equivalent (v2 only
- * accepts a duration) so it is omitted — the host default applies.
+ * `package` runtime. Explicitly disable all three independent client deadlines:
+ * the browser adapter can buffer output while importing history and validating
+ * calls. Disabling only total timeout leaves the five-minute header default.
  */
 export function buildV2ProviderInfo(adapterBaseURL: string): Provider.Info {
   return {
@@ -43,7 +43,7 @@ export function buildV2ProviderInfo(adapterBaseURL: string): Provider.Info {
     name: "ChatGPT Web (browser tool bridge)",
     activation: "enabled",
     package: V2_PROVIDER_PACKAGE,
-    settings: { baseURL: adapterBaseURL, timeout: false },
+    settings: { baseURL: adapterBaseURL, headerTimeout: false, chunkTimeout: false, timeout: false },
   }
 }
 

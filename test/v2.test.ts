@@ -227,7 +227,7 @@ describe("v2 builders match the v1 config shapes", () => {
       name: "ChatGPT Web (browser tool bridge)",
       activation: "enabled",
       package: "@opencode/ai/providers/openai-compatible",
-      settings: { baseURL: BASE_URL, timeout: false },
+      settings: { baseURL: BASE_URL, headerTimeout: false, chunkTimeout: false, timeout: false },
     })
   })
 
