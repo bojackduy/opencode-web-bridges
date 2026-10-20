@@ -18,7 +18,7 @@ import {
   loginInstructions,
   probeReadiness,
 } from "./supervisor"
-import { doctorReport, formatDoctor, loginFlow, statusReport } from "./tools"
+import { doctorReport, formatDoctor, loginFlow, recoverReport, statusReport } from "./tools"
 import { setup as setupV2 } from "./v2"
 import { resolveGemini, applyGeminiConfig } from "./gemini"
 
@@ -91,6 +91,32 @@ const server = async (
               : "Binaries still downloading — retry in a few seconds."
           }
           return formatDoctor(await doctorReport(state.opts, state.binaries))
+        },
+      }),
+      "chatgpt-recover": tool({
+        description:
+          "Inspect or resolve this chat's unanswered turn: what the bridge knows, read the previous reply back without resending anything, or deliberately clear the uncertainty. Inspects by default; never submits.",
+        args: {
+          action: tool.schema
+            .enum(["inspect", "recover", "abandon"])
+            .optional()
+            .describe("What to do: inspect the chat (default), recover the previous reply, or abandon the unconfirmed turn."),
+          session: tool.schema
+            .string()
+            .optional()
+            .describe("Chat to act on. Defaults to this chat; required when clearing one."),
+          reason: tool.schema
+            .string()
+            .optional()
+            .describe("Why the turn is being cleared. Only meaningful with action 'abandon'."),
+        },
+        execute: async (args, context) => {
+          if (!state.binaries) {
+            return state.binaryError
+              ? `Binaries not ready: ${state.binaryError}`
+              : "Binaries still downloading — retry in a few seconds."
+          }
+          return await recoverReport(state.opts, args, context.sessionID)
         },
       }),
     },

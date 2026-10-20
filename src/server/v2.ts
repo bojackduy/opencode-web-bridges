@@ -17,7 +17,7 @@ import { MCP_ID, MODEL_ID, PROVIDER_ID } from "./config-shape"
 import { ensureShared, type SharedState } from "./shared"
 import { assetName, cacheDir, currentPlatform } from "./binaries"
 import { loginInstructions, probeReadiness } from "./supervisor"
-import { doctorReport, formatDoctor, loginFlow, statusReport } from "./tools"
+import { doctorReport, formatDoctor, loginFlow, recoverReport, statusReport } from "./tools"
 import { resolveGemini, registerGeminiV2Provider, registerGeminiV2Mcp } from "./gemini"
 
 /** Runtime package speaking the OpenAI request format (v2 equivalent of the v1 `npm: "@ai-sdk/openai-compatible"` entry). */
@@ -26,7 +26,8 @@ export const V2_PROVIDER_PACKAGE = "@opencode/ai/providers/openai-compatible"
 export const COMMAND_STATUS = "chatgpt-status"
 export const COMMAND_LOGIN = "chatgpt-login"
 export const COMMAND_DOCTOR = "chatgpt-doctor"
-export const COMMAND_NAMES = [COMMAND_STATUS, COMMAND_LOGIN, COMMAND_DOCTOR] as const
+export const COMMAND_RECOVER = "chatgpt-recover"
+export const COMMAND_NAMES = [COMMAND_STATUS, COMMAND_LOGIN, COMMAND_DOCTOR, COMMAND_RECOVER] as const
 
 // ─── Pure builders (unit-testable, no I/O) ─────────────────────────────────
 
@@ -161,6 +162,9 @@ export function buildV2CommandExecutions(
     [COMMAND_LOGIN]: async () => login(state.opts),
     [COMMAND_DOCTOR]: async () =>
       state.binaries ? formatDoctor(await doctorReport(state.opts, state.binaries)) : pending(),
+    // A v2 command carries no arguments, so this surface only ever inspects the
+    // invoking chat — the read-only action that is safe without a named chat.
+    [COMMAND_RECOVER]: async (call) => (state.binaries ? recoverReport(state.opts, {}, call.sessionID) : pending()),
   }
 }
 
@@ -169,6 +173,8 @@ const COMMAND_DESCRIPTIONS: Record<string, string> = {
   [COMMAND_LOGIN]: "Launch the profile Chrome window for one-time ChatGPT login, then re-probe readiness.",
   [COMMAND_DOCTOR]:
     "Diagnose the ChatGPT Web bridge: binaries, ports, Chrome CDP, login state — each with repair hints.",
+  [COMMAND_RECOVER]:
+    "Inspect this chat's unanswered turn: what the bridge knows, what is unknown, what was kept, and which actions are available.",
 }
 
 export function registerV2Commands(

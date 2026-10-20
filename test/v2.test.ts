@@ -22,6 +22,7 @@ import {
   COMMAND_DOCTOR,
   COMMAND_LOGIN,
   COMMAND_NAMES,
+  COMMAND_RECOVER,
   COMMAND_STATUS,
   registerV2Commands,
   registerV2Mcp,
@@ -281,7 +282,7 @@ describe("v2 commands mirror the v1 tools", () => {
     )
     expect([...editor.defs.keys()].sort()).toEqual([...COMMAND_NAMES].sort())
     expect([...editor.defs.keys()].sort()).toEqual(
-      [COMMAND_STATUS, COMMAND_LOGIN, COMMAND_DOCTOR].sort(),
+      [COMMAND_STATUS, COMMAND_LOGIN, COMMAND_DOCTOR, COMMAND_RECOVER].sort(),
     )
     for (const def of editor.defs.values()) {
       expect(typeof def.description).toBe("string")
@@ -317,6 +318,7 @@ describe("v2 commands mirror the v1 tools", () => {
     const call = { sessionID: "s", prompt: { text: "" }, delivery: "steer" as const}
     expect(await exec[COMMAND_STATUS]!(call)).toContain("Binaries still downloading")
     expect(await exec[COMMAND_DOCTOR]!(call)).toContain("Binaries still downloading")
+    expect(await exec[COMMAND_RECOVER]!(call)).toContain("Binaries still downloading")
     expect(await exec[COMMAND_LOGIN]!(call)).toContain("Chrome")
     expect(loginOptions).toEqual([state.opts])
   })
@@ -337,7 +339,7 @@ describe("v2 session-activity login watcher gate", () => {
 // ─── Full setup wiring ───────────────────────────────────────────────────────
 
 describe("v2 setup wires every domain", () => {
-  test("registers provider + mcp + 3 commands on an empty host", async () => {
+  test("registers provider + mcp + 4 commands on an empty host", async () => {
     const ctx = fakeContext()
     const state = fakeState()
     const { setup: setupWithState } = await import("../src/server/v2")
@@ -361,7 +363,7 @@ describe("v2 setup wires every domain", () => {
     const cleanup = await (setupWithState as any)(ctx, fakeState())
     expect(ctx.providerEditor.added).toHaveLength(0)
     expect(ctx.mcpEditor.sets).toHaveLength(0)
-    expect(ctx.commandEditor.defs.size).toBe(3)
+    expect(ctx.commandEditor.defs.size).toBe(4)
     await (cleanup as any)()
   })
 })

@@ -47,6 +47,35 @@ export async function httpGet(
   }
 }
 
+/**
+ * JSON request to the local adapter. Throws only when the adapter cannot be
+ * reached at all — a non-2xx status is returned to the caller, because the
+ * recovery endpoints spell their refusals in the body.
+ */
+export async function httpJSON(
+  host: string,
+  port: number,
+  method: "GET" | "POST",
+  reqPath: string,
+  headers: Record<string, string>,
+  body?: unknown,
+  timeoutMs = 10_000,
+): Promise<{ status: number; text: string }> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(`http://${host}:${port}${reqPath}`, {
+      method,
+      headers: body === undefined ? headers : { ...headers, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: controller.signal,
+    })
+    return { status: res.status, text: (await res.text()).slice(0, 4000) }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** Readiness via the adapter's /readyz endpoint. */
 export async function probeReadiness(
   host: string,
