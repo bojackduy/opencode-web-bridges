@@ -27,6 +27,13 @@ export interface ChatGPTPluginOptions {
   maxChars?: number
   /** When true, sets CHATGPT_BRIDGE_PROJECT_PER_SESSION=1 for the adapter. Default false. */
   projectPerSession?: boolean
+  /**
+   * Keep the plugin's 60s process janitor running: it relaunches Chrome and the
+   * adapter whenever they are gone. Set false when something else owns their
+   * lifecycle (launchd, a service manager, or you), so quitting Chrome stays
+   * quit. Default true.
+   */
+  supervise?: boolean
 }
 
 export interface ResolvedOptions {
@@ -39,6 +46,7 @@ export interface ResolvedOptions {
   adapterPort: number
   maxChars: number
   projectPerSession: boolean
+  supervise: boolean
 }
 
 export const DEFAULTS = {
@@ -91,6 +99,7 @@ export function resolveOptions(raw?: Record<string, unknown>): ResolvedOptions {
     adapterPort,
     maxChars,
     projectPerSession: o.projectPerSession === true,
+    supervise: o.supervise !== false,
   }
 }
 

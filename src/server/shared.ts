@@ -36,7 +36,10 @@ export function ensureShared(rawOptions: Record<string, unknown> | undefined): S
   state.ready = (opts.bridgeSource ? sourceBinaries(opts.bridgeSource) : ensureBinaries({ releasesRepo: opts.releasesRepo, version: opts.version }))
     .then((binaries) => {
       state.binaries = binaries
-      state.supervisor = startSupervisor(opts, binaries)
+      // The janitor relaunches Chrome and the adapter whenever they are gone.
+      // When something else owns their lifecycle, leaving it on means a user
+      // who quits Chrome gets it reopened within 60 seconds.
+      if (opts.supervise) state.supervisor = startSupervisor(opts, binaries)
     })
     .catch((error) => {
       state.binaryError = error instanceof Error ? error.message : String(error)

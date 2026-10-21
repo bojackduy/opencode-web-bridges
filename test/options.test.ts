@@ -12,6 +12,13 @@ describe("resolveOptions defaults", () => {
     expect(o.adapterPort).toBe(8788)
     expect(o.maxChars).toBe(200000)
     expect(o.projectPerSession).toBe(false)
+    expect(o.supervise).toBe(true)
+  })
+
+  test("supervise is opt-out only: anything but false keeps the janitor", () => {
+    expect(resolveOptions({ supervise: false }).supervise).toBe(false)
+    expect(resolveOptions({ supervise: true }).supervise).toBe(true)
+    expect(resolveOptions({ supervise: "no" }).supervise).toBe(true)
   })
 
   test("overrides apply; invalid values fall back to defaults", () => {
