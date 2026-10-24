@@ -123,11 +123,11 @@ class Writer:
             self.emit(st, ts, "SEND         not clicked (control disabled)")
 
     def stage_send_observed(self, st, ts, data):
+        waited = ", %s" % data["waited"] if "waited" in data else ""
         if data.get("result") == "submitted":
-            self.emit(st, ts, "SUBMITTED    turn started (checks=%s, %s)" % (
-                data.get("retries", "?"), data.get("waited", "?")))
+            self.emit(st, ts, "SUBMITTED    turn started (checks=%s%s)" % (data.get("retries", "?"), waited))
         else:
-            self.emit(st, ts, "UNOBSERVED   click landed but no turn appeared after %s" % data.get("waited", "?"))
+            self.emit(st, ts, "UNOBSERVED   click landed but no turn appeared after %s" % data.get("waited", "the observation window"))
 
     def stage_stream_wait(self, st, ts, data):
         self.emit(st, ts, "STREAM       polling for the answer")
