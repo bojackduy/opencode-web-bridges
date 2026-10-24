@@ -310,6 +310,10 @@ via `GOOS=`/`GOARCH=` cross-compilation — no Windows runner involved.
 | `checksum mismatch` | Delete the versioned cache dir above and restart opencode. |
 | `unsupported platform` | Prebuilt binaries cover darwin-arm64, darwin-amd64, linux-amd64, linux-arm64, windows-amd64, windows-arm64. Build chatgpt-proxy from source and point `releasesRepo` at your fork. |
 
+A failed turn always has a reason in the adapter log. Read it per request, not
+per line: [docs/BRIDGE_LOGS.md](docs/BRIDGE_LOGS.md) maps every stage, the
+flow-id timeline, and what each stopped stage means for retrying safely.
+
 This uses your personal ChatGPT session (subject to its usage limits).
 
 ## Publishing (maintainers)
