@@ -142,6 +142,9 @@ Read the **last stage a flow id reached**. This is the whole diagnostic.
 | `send_click err=<nil> clicked=true` then `send_observed result=unobserved` | the click landed but no turn appeared | **outcome unproven** — do not resend automatically; inspect the tab. A 150 KB+ prompt can block the renderer past the 10 s observation window, so a very large turn can report this even when it did start. |
 | `send_click err=...` | the click call failed after dispatch | **outcome uncertain** — never resend automatically |
 | `finish err=... ErrSubmissionUncertain` | same as above, terminal | read the chat in the dedicated window |
+| `err=... completed protocol source could not be verified ... (reason=transport\|auth-http\|conversation-http\|exception)` | the transcript API or the read itself was unavailable; identity checks never ran | transient: retryable, never a reason to accept rendered arguments |
+| `err=... completed protocol source could not be verified ... (reason=identity)` | the finished answer's DOM/source identity, user ancestry or thread did not match | deterministic refusal; do not bypass |
+| `adoption user-bubble mismatch path=bubble` | the stored answer could not be matched to the pending prompt from a partially rendered bubble | wait for the ID-bound source; a `mapping` mismatch is a real divergence |
 | `protocol_validation result=rejected` | an answer arrived but broke the tool protocol; no calls delivered | the turn is spent; do not resend |
 | `finish err=... context canceled` | the adapter was stopped mid-turn (deploy, restart) | check the deploy window before blaming the bridge |
 
