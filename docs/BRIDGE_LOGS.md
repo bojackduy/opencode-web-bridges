@@ -157,6 +157,56 @@ Hard rules the logs encode:
 - `submitted` without `send_observed` is not proof of a turn; the answer wait
   remains the authority.
 
+## Stream capture and stream-confirmed turns
+
+The adapter decodes the browser's own SSE response for the generation request.
+This is on by default, because the capture is the only proof of a turn that
+does not depend on the page settling. `CHATGPT_BRIDGE_SHADOW_STREAM=0` returns
+to the DOM-only path; any other value (including unset) keeps the capture on.
+
+What it reads: one POST to `/backend-api/f/conversation`, answered with
+`text/event-stream`. Frames patch a message map (`p`/`o`/`v`, with `p` and `o`
+sticky across frames), and `message_stream_complete` states completion. Chrome
+withholds that body unless it is streamed, and the response never reports
+`loadingFinished`, so EOF is not a completion signal.
+
+One content-free line is logged per turn:
+
+```
+[chatgpt-shadow] id=... frames=... bytes=... completed=... correlated=...
+  match=... ignored=... shadow_bytes=... answer_bytes=... reason="..."
+```
+
+| `reason` | meaning |
+| --- | --- |
+| `""` | the stream reconstructed an answer bound to this prompt |
+| `no explicit completion` | the stream ended without `message_stream_complete`; inconclusive, never an answer |
+| `no matching user message` | the streamed user text is not this prompt (a `user_candidates=...` line reports sizes only) |
+| `assistant lineage` | no assistant message reaches the prompt through its parent chain |
+| `completion conversation mismatch` | the completion names a different conversation than the answer |
+| `unsupported patch` | a patch could have changed the answer body or its identity and was not applied |
+| `stream aborted`, `stream unavailable`, `listener panic` | transport or listener failure; the DOM path still decides the turn |
+
+`match=true` means the reconstruction equals the delivered answer. A `false`
+with equal sizes and a long shared prefix is usually a rendering difference,
+not a missing answer; sizes and shared edges are logged, never text.
+
+The adapter accepts a turn as soon as the stream declares completion. The captured message is the server's own record of the turn: its
+status, completeness, conversation and parent chain were asserted on it, so the
+adapter delivers that text directly and re-applies the bridge-call envelope
+rule. It does not read the answer back from the page. Logged as:
+
+```
+[chatgpt-flow] id=... stage=stream_confirmed answer_bytes=...
+```
+
+A separate read-back by message ID is not possible for these threads. Each one
+is created inside a project, and `/backend-api/conversations` (flat list) is
+empty while `/backend-api/conversation/<id>` and every project-scoped variant
+answer 404 for the same IDs. That path exists because waiting for the DOM to
+settle is what produces "A previous reply could not be confirmed". Thinking
+turns keep the ordinary path, since reasoning is only available from the page.
+
 ## Verify a deployment without touching the browser
 
 Probing `/readyz` launches or attaches to Chrome. Use only:
