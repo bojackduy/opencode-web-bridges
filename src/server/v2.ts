@@ -19,6 +19,7 @@ import { assetName, cacheDir, currentPlatform } from "./binaries"
 import { loginInstructions, probeReadiness } from "./supervisor"
 import { doctorReport, formatDoctor, loginFlow, recoverReport, statusReport } from "./tools"
 import { resolveGemini, registerGeminiV2Provider, registerGeminiV2Mcp } from "./gemini"
+import { resolveDeepseek, registerDeepseekV2Provider } from "./deepseek"
 
 /** Runtime package speaking the OpenAI request format (v2 equivalent of the v1 `npm: "@ai-sdk/openai-compatible"` entry). */
 export const V2_PROVIDER_PACKAGE = "@opencode/ai/providers/openai-compatible"
@@ -228,10 +229,14 @@ export async function setup(
 ): Promise<(() => Promise<void>) | void> {
   if (context.options.chatgpt === false) {
     const gemini = resolveGemini(context.options.gemini)
-    if (gemini) {
-      await context.provider.transform(editor => registerGeminiV2Provider(editor, gemini))
-      await context.mcp.transform(editor => registerGeminiV2Mcp(editor, gemini))
+    const deepseek = resolveDeepseek(context.options.deepseek)
+    if (gemini || deepseek) {
+      await context.provider.transform(editor => {
+        if (gemini) registerGeminiV2Provider(editor, gemini)
+        if (deepseek) registerDeepseekV2Provider(editor, deepseek)
+      })
     }
+    if (gemini) await context.mcp.transform(editor => registerGeminiV2Mcp(editor, gemini))
     return
   }
   // `injected` is test-only: unit tests pass a fake SharedState so no real
@@ -239,6 +244,7 @@ export async function setup(
   const state = injected ?? ensureShared({ ...(context.options as Record<string, unknown>) })
   const opts = state.opts
   const gemini = resolveGemini(context.options.gemini)
+  const deepseek = resolveDeepseek(context.options.deepseek)
   const adapterBaseURL = `http://${opts.adapterHost}:${opts.adapterPort}/v1`
   if (opts.bridgeSource) {
     await state.ready
@@ -248,6 +254,7 @@ export async function setup(
   await context.provider.transform((editor) => {
     registerV2Provider(editor, adapterBaseURL)
     if (gemini) registerGeminiV2Provider(editor, gemini)
+    if (deepseek) registerDeepseekV2Provider(editor, deepseek)
   })
 
   // Fill-missing-only over a live cell: the transform replays on every

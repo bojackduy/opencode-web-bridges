@@ -5,12 +5,15 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { validateSource, type BridgeSource } from "./source"
 import type { GeminiOptions } from "./gemini"
+import type { DeepseekOptions } from "./deepseek"
 
 export interface ChatGPTPluginOptions {
   /** false: registration-only Gemini setup; preserve externally owned ChatGPT. */
   chatgpt?: boolean
   /** Explicit opt-in Gemini local binary, externally managed adapter. */
   gemini?: Partial<GeminiOptions> & Pick<GeminiOptions, "proxyBinary">
+  /** Explicit opt-in DeepSeek local adapter (HTTP+SSE, no Chrome). */
+  deepseek?: Partial<DeepseekOptions> & Pick<DeepseekOptions, "proxyBinary">
   /** Installer-pinned source build; startup only reads its verified cache. */
   bridgeSource?: BridgeSource
   /** GitHub repo hosting chatgpt-proxy releases. Default "bojackduy/chatgpt-proxy". */

@@ -21,6 +21,7 @@ import {
 import { doctorReport, formatDoctor, loginFlow, recoverReport, statusReport } from "./tools"
 import { setup as setupV2 } from "./v2"
 import { resolveGemini, applyGeminiConfig } from "./gemini"
+import { resolveDeepseek, applyDeepseekConfig } from "./deepseek"
 
 const PLUGIN_ID = "opencode-web-bridges"
 
@@ -33,19 +34,28 @@ const server = async (
   // service without starting ChatGPT's binary manager or supervisor.
   if (pluginOptions?.chatgpt === false) {
     const gemini = resolveGemini(pluginOptions.gemini)
-    return { config: async config => { if (gemini) applyGeminiConfig(config as unknown as Record<string, any>, gemini) } }
+    const deepseek = resolveDeepseek(pluginOptions.deepseek)
+    return {
+      config: async config => {
+        const cfg = config as unknown as Record<string, any>
+        if (gemini) applyGeminiConfig(cfg, gemini)
+        if (deepseek) applyDeepseekConfig(cfg, deepseek)
+      },
+    }
   }
   // Background binary ensure + supervision, started once per process and
   // shared with the v2 setup path. Never blocks plugin setup on download.
   const state = injected ?? ensureShared(pluginOptions)
   const opts = state.opts
   const gemini = resolveGemini(pluginOptions?.gemini)
+  const deepseek = resolveDeepseek(pluginOptions?.deepseek)
 
   const adapterBaseURL = `http://${opts.adapterHost}:${opts.adapterPort}/v1`
   const hooks: Hooks = {
     config: async (config) => {
       const cfg = config as unknown as Record<string, any>
       if (gemini) applyGeminiConfig(cfg, gemini)
+      if (deepseek) applyDeepseekConfig(cfg, deepseek)
       // v1 cannot reload the injected MCP command after a background download.
       // Resolve it before registration; existing manual MCP entries need no wait.
       if (cfg.mcp?.[MCP_ID] === undefined) {

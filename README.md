@@ -57,6 +57,49 @@ sessions, media inputs, chunked replay, or recovery UX. Streaming is buffered SS
 not incremental generation. Windows profile verification is currently unsupported;
 Linux and Windows have not been live verified.
 
+## Optional DeepSeek Web — HTTP + SSE, no browser automation
+
+DeepSeek is a third engine with a different shape: the adapter speaks the web
+API directly (`/api/v0/chat/completion`, protobuf-style SSE patches, PoW
+handshake), so there is **no Chrome, no CDP, no DOM scraping**. It needs one
+thing from you: a token.
+
+```sh
+go -C deepseek-proxy build -o bin/deepseek-openai ./cmd/deepseek-openai
+./deepseek-proxy/bin/deepseek-openai -login      # paste userToken, stored 0600
+./deepseek-proxy/bin/deepseek-openai -addr 127.0.0.1:8790
+```
+
+Get `userToken` from a signed-in chat.deepseek.com: DevTools → Application →
+Local Storage → `userToken`. `-login` accepts a bare token, a quoted one, or
+`Bearer ...`; `DEEPSEEK_TOKEN` overrides at runtime.
+
+```json
+{
+  "chatgpt": false,
+  "deepseek": {
+    "proxyBinary": "/absolute/path/opencode-web-bridges/deepseek-proxy/bin/deepseek-openai"
+  }
+}
+```
+
+Optional field `adapterBaseURL` (default `http://127.0.0.1:8790/v1`, loopback
+only). Models: `deepseek-web`, `deepseek-reasoner` (thinking), `deepseek-expert`.
+All advertise tool calling.
+
+**Why revert, fork and model switch work here.** The client history is
+authoritative and the journal only records what was actually submitted:
+
+| incoming request | plan | what happens |
+| --- | --- | --- |
+| extends the committed history | `append` | only the new messages are sent, `parent_message_id` = last reply |
+| same request after a failed turn | `retry` | the remote transcript is read back; nothing is resent |
+| anything else (revert, edit, fork, model switch, compact) | `reseed` | fresh remote session, whole history rendered once |
+
+So there is no uncertain state to recover from: at worst you pay one reseed.
+Logs are content-free (`plan=`, message counts, `prompt_bytes`, `tool_calls`,
+`answer_bytes`, reason codes).
+
 ## Install
 
 **Publication status:** this npm package is not published yet, and the bridge's

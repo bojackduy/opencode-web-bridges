@@ -6,3 +6,7 @@
 	path = gemini-proxy
 	url = git@Duyyy123:bojackduy/gemini-proxy.git
 	branch = main
+[submodule "deepseek-proxy"]
+	path = deepseek-proxy
+	url = git@Duyyy123:bojackduy/deepseek-proxy.git
+	branch = main
