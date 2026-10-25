@@ -207,6 +207,37 @@ answer 404 for the same IDs. That path exists because waiting for the DOM to
 settle is what produces "A previous reply could not be confirmed". Thinking
 turns keep the ordinary path, since reasoning is only available from the page.
 
+## History rewrites: revert, fork, model switch
+
+When a turn is interrupted, the session is dirty and its pending turn is
+unknown. The client may then rewrite its own timeline. The adapter classifies
+the incoming history against the committed journal and continues on a fresh
+thread instead of refusing:
+
+| Classification | Shape | Result |
+| --- | --- | --- |
+| `rewrite-truncation` | shorter, prefix-equal | reseed |
+| `rewrite-divergence` | same length, content differs (fork/regeneration) | reseed |
+| `rewrite-compaction` | summarized system prefix | reseed |
+| `rewrite-continuation` | committed journal is a canonical prefix, tail is new (revert + new message) | reseed |
+| `ambiguous` | dangling/duplicate/unmatched tool results | refuse (409/422) |
+| (none) | identical retry of the pending request | refuse, never resubmitted |
+
+An armed reseed always abandons the old thread: it never appends a delta to a
+thread that holds an abandoned turn. The pending turn is listed as not carried
+in `ReseedEvidence`, and nothing from it is submitted as pending. A completed
+answer for that prompt that recovery could not bind is load-bearing and still
+refuses. Logged as:
+
+```
+[openai] session=... rewrite-reseed continuation: committed journal is a prefix of the client history added=N; uncertain turn abandoned without resubmission
+[openai] session=... rewrite-reseed armed classification=rewrite-continuation carried=N not_carried=N; abandoning uncertain thread without adoption
+```
+
+A dirty session with no committed journal is not a continuation: there is no
+committed state to prove the client's history came from the bridge, so it keeps
+the terminal refusal.
+
 ## Verify a deployment without touching the browser
 
 Probing `/readyz` launches or attaches to Chrome. Use only:
