@@ -367,3 +367,205 @@ describe("v2 setup wires every domain", () => {
     await (cleanup as any)()
   })
 })
+
+// ─── chatgpt-recover direct execution (no assistant turn does the work) ─────
+
+describe("parseRecoverInvocation", () => {
+  test("empty text inspects the invoking chat on the chatgpt bridge", async () => {
+    const { parseRecoverInvocation } = await import("../src/server/v2")
+    expect(parseRecoverInvocation("")).toEqual({ args: {}, bridge: "chatgpt" })
+  })
+
+  test("action, session, bridge and quoted reason", async () => {
+    const { parseRecoverInvocation } = await import("../src/server/v2")
+    expect(parseRecoverInvocation('/chatgpt-recover abandon ses_9 -reason "stuck turn" -bridge gemini')).toEqual({
+      args: { action: "abandon", session: "ses_9", reason: "stuck turn" },
+      bridge: "gemini",
+    })
+  })
+
+  test("bare session defaults to inspect", async () => {
+    const { parseRecoverInvocation } = await import("../src/server/v2")
+    expect(parseRecoverInvocation("ses_9")).toEqual({
+      args: { session: "ses_9" },
+      bridge: "chatgpt",
+    })
+  })
+
+  test("wildcards never resolve to a session", async () => {
+    const { parseRecoverInvocation } = await import("../src/server/v2")
+    const parsed = parseRecoverInvocation("abandon *")
+    expect(parsed.args.session).toBeUndefined()
+  })
+})
+
+describe("v2 recover command executes against the adapter directly", () => {
+  function fixture(
+    routes: Record<string, (req: Request) => Response | Promise<Response>>,
+  ) {
+    const seen: string[] = []
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(req) {
+        const url = new URL(req.url)
+        seen.push(`${req.method} ${url.pathname}`)
+        const h = routes[`${req.method} ${url.pathname}`]
+        if (!h) return new Response("nope", { status: 404 })
+        return h(req)
+      },
+    })
+    return { base: `http://127.0.0.1:${server.port}/v1`, seen, stop: () => server.stop() }
+  }
+
+  const json = (v: unknown) =>
+    new Response(JSON.stringify(v), { headers: { "content-type": "application/json" } })
+
+  function liveState(binaries = { openai: "a", proxy: "b", version: "v" }) {
+    const s = fakeState()
+    return { ...s, binaries } as typeof s
+  }
+
+  test("inspect runs the HTTP call itself and delivers a plain-English report", async () => {
+    const fx = fixture({
+      "GET /v1/sessions/state": () =>
+        json({
+          session: "ses_9",
+          state: "pending_verifiable",
+          can_recover: true,
+          can_resync: false,
+          thread_url_present: true,
+          completed_messages: 3,
+          pending_prompt_bytes: 12,
+          outstanding_tool_calls: 1,
+          summary: "A previous reply could not be confirmed.",
+          actions: ["recover", "abandon"],
+        }),
+    })
+    try {
+      const base = liveState()
+      const state = {
+        ...base,
+        opts: resolveOptions({ adapterAddr: `127.0.0.1:${new URL(fx.base).port}` }),
+      }
+      const exec = buildV2CommandExecutions(state)
+      const prompts: Array<Record<string, unknown>> = []
+      const editor = fakeCommandEditor()
+      registerV2Commands(editor, { prompt: async (input) => void prompts.push(input as any) }, exec)
+      await editor.defs.get(COMMAND_RECOVER)!.execute({
+        sessionID: "ses_9",
+        prompt: { text: "/chatgpt-recover inspect" },
+        delivery: "steer",
+      })
+      expect(fx.seen).toEqual(["GET /v1/sessions/state"])
+      expect(prompts).toHaveLength(1)
+      expect(String((prompts[0] as any).text)).toContain("could not be confirmed")
+    } finally {
+      fx.stop()
+    }
+  })
+
+  test("abandon with a named session clears only that chat", async () => {
+    let body: any = null
+    const fx = fixture({
+      "POST /v1/sessions/abandon": async (req) => {
+        body = await req.json()
+        return json({
+          results: [
+            {
+              session: "ses_9",
+              outcome: "abandoned",
+              state_before: "pending_verifiable",
+              delivered_calls: 1,
+              recorded_results: 1,
+              outstanding_calls: 0,
+              abandoned_prompt_bytes: 12,
+            },
+          ],
+        })
+      },
+    })
+    try {
+      const base = liveState()
+      const state = {
+        ...base,
+        opts: resolveOptions({ adapterAddr: `127.0.0.1:${new URL(fx.base).port}` }),
+      }
+      const exec = buildV2CommandExecutions(state)
+      const prompts: Array<Record<string, unknown>> = []
+      const editor = fakeCommandEditor()
+      registerV2Commands(editor, { prompt: async (input) => void prompts.push(input as any) }, exec)
+      await editor.defs.get(COMMAND_RECOVER)!.execute({
+        sessionID: "other",
+        prompt: { text: "abandon ses_9 -reason stuck" },
+        delivery: "steer",
+      })
+      expect(body).toEqual({ sessions: ["ses_9"], reason: "stuck" })
+      expect(String((prompts[0] as any).text)).toContain("Cleared the unconfirmed turn")
+    } finally {
+      fx.stop()
+    }
+  })
+
+  test("gemini recover is refused with guidance and zero adapter contact", async () => {
+    const fx = fixture({})
+    try {
+      const exec = buildV2CommandExecutions(liveState(), undefined, {
+        geminiBaseURL: fx.base,
+      })
+      const out = await exec[COMMAND_RECOVER]!({
+        sessionID: "ses_9",
+        prompt: { text: "recover -bridge gemini" },
+        delivery: "steer",
+      })
+      expect(out).toContain("no read-only adoption endpoint")
+      expect(fx.seen).toEqual([])
+    } finally {
+      fx.stop()
+    }
+  })
+
+  test("a wedged chat that cannot take the report does not fail the work", async () => {
+    const fx = fixture({
+      "GET /v1/sessions/state": () =>
+        json({
+          session: "ses_9",
+          state: "clean",
+          can_recover: false,
+          can_resync: false,
+          thread_url_present: true,
+          completed_messages: 1,
+          pending_prompt_bytes: 0,
+          outstanding_tool_calls: 0,
+          summary: "up to date",
+          actions: ["continue"],
+        }),
+    })
+    try {
+      const base = liveState()
+      const state = {
+        ...base,
+        opts: resolveOptions({ adapterAddr: `127.0.0.1:${new URL(fx.base).port}` }),
+      }
+      const exec = buildV2CommandExecutions(state)
+      const editor = fakeCommandEditor()
+      registerV2Commands(
+        editor,
+        {
+          prompt: async () => {
+            throw new Error("wedged chat")
+          },
+        },
+        exec,
+      )
+      await editor.defs.get(COMMAND_RECOVER)!.execute({
+        sessionID: "ses_9",
+        prompt: { text: "" },
+        delivery: "steer",
+      })
+      expect(fx.seen).toEqual(["GET /v1/sessions/state"])
+    } finally {
+      fx.stop()
+    }
+  })
+})

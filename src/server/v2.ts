@@ -18,6 +18,8 @@ import { ensureShared, type SharedState } from "./shared"
 import { assetName, cacheDir, currentPlatform } from "./binaries"
 import { loginInstructions, probeReadiness } from "./supervisor"
 import { doctorReport, formatDoctor, loginFlow, recoverReport, statusReport } from "./tools"
+import { bridgeRequest } from "./tools"
+import type { RecoverArgs } from "./tools"
 import { resolveGemini, registerGeminiV2Provider, registerGeminiV2Mcp } from "./gemini"
 import { resolveDeepseek, registerDeepseekV2Provider } from "./deepseek"
 
@@ -149,9 +151,74 @@ export function shouldCheckLogin(eventType: unknown, state: Pick<SharedState, "f
 }
 
 /** Command executors share the v1 tool logic via tools.ts — no duplication. */
+export interface RecoverBridges {
+  readonly geminiBaseURL?: string
+}
+
+/**
+ * Parse what the user typed after `/chatgpt-recover`: an action, a session
+ * id, and an optional `-bridge gemini|chatgpt` plus `-reason "..."`. A
+ * leading `/chatgpt-recover` token is tolerated. Anything unrecognized is
+ * left for the report layer, which answers in plain English instead of
+ * throwing usage errors.
+ */
+export function parseRecoverInvocation(text: string): {
+  args: RecoverArgs
+  bridge: "chatgpt" | "gemini"
+} {
+  const tokens = text.match(/"[^"]*"|'[^']*'|\S+/g) ?? []
+  const words = tokens.map((t) =>
+    t.startsWith("/chatgpt-recover") ? t.slice("/chatgpt-recover".length) : t,
+  ).filter((t) => t !== "")
+  const args: RecoverArgs = {}
+  let bridge: "chatgpt" | "gemini" = "chatgpt"
+  const rest: string[] = []
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!
+    if (w === "-bridge" && i + 1 < words.length) {
+      const b = words[++i]!.toLowerCase()
+      if (b === "gemini" || b === "chatgpt") bridge = b
+      continue
+    }
+    if (w === "-reason") {
+      const parts: string[] = []
+      while (i + 1 < words.length && !words[i + 1]!.startsWith("-")) parts.push(words[++i]!)
+      args.reason = parts.join(" ").replace(/^["']|["']$/g, "")
+      continue
+    }
+    if (w.startsWith("-")) continue
+    rest.push(w)
+  }
+  const actions = ["inspect", "recover", "abandon"]
+  for (const w of rest) {
+    if (!args.action && actions.includes(w.toLowerCase())) {
+      args.action = w.toLowerCase()
+      continue
+    }
+    if (!args.session) {
+      const id = w.replace(/^["']|["']$/g, "")
+      const bad =
+        id === "" || id.includes("*") || /^(all|any)$/i.test(id)
+          ? w
+          : ""
+      if (bad === "") {
+        args.session = id
+        continue
+      }
+    }
+  }
+  if (rest.length > 0 && !args.action && !args.session) {
+    // A single unrecognized token is still reported, not thrown: keep it as
+    // the action so the report layer explains the valid actions.
+    args.action = rest[0]
+  }
+  return { args, bridge }
+}
+
 export function buildV2CommandExecutions(
   state: SharedState,
   login: typeof loginFlow = loginFlow,
+  bridges: RecoverBridges = {},
 ): Record<string, (call: V2CommandCall) => Promise<string>> {
   const pending = (): string =>
     state.binaryError
@@ -163,9 +230,35 @@ export function buildV2CommandExecutions(
     [COMMAND_LOGIN]: async () => login(state.opts),
     [COMMAND_DOCTOR]: async () =>
       state.binaries ? formatDoctor(await doctorReport(state.opts, state.binaries)) : pending(),
-    // A v2 command carries no arguments, so this surface only ever inspects the
-    // invoking chat — the read-only action that is safe without a named chat.
-    [COMMAND_RECOVER]: async (call) => (state.binaries ? recoverReport(state.opts, {}, call.sessionID) : pending()),
+    // A v2 command carries typed arguments in the invocation text after the
+    // command name; the calling chat is the default session. The recovery
+    // HTTP calls run right here in the plugin host — no assistant turn is
+    // spent doing the work. Only the human-readable report travels back
+    // through session.prompt, and that delivery is best-effort: on a wedged
+    // chat the work is already done, so a failed delivery must not throw.
+    [COMMAND_RECOVER]: async (call) => {
+      if (!state.binaries) return pending()
+      const invocation = parseRecoverInvocation(call.prompt?.text ?? "")
+      if (invocation.bridge === "gemini") {
+        if (!bridges.geminiBaseURL) {
+          return "The Gemini bridge is not configured in this plugin, so there is nothing to inspect. Configure it under the plugin's gemini options, then retry."
+        }
+        const action = (invocation.args.action ?? "inspect").toLowerCase()
+        if (action === "recover") {
+          return [
+            `The Gemini bridge has no read-only adoption endpoint, so "recover" cannot run there.`,
+            `Moves: send a distinct request (the adapter reseeds a fresh thread and abandons the old one, never resending it), or run: /chatgpt-recover abandon <session-id> -bridge gemini`,
+          ].join("\n")
+        }
+        return recoverReport(
+          state.opts,
+          invocation.args,
+          call.sessionID,
+          bridgeRequest(bridges.geminiBaseURL),
+        )
+      }
+      return recoverReport(state.opts, invocation.args, call.sessionID)
+    },
   }
 }
 
@@ -175,7 +268,7 @@ const COMMAND_DESCRIPTIONS: Record<string, string> = {
   [COMMAND_DOCTOR]:
     "Diagnose the ChatGPT Web bridge: binaries, ports, Chrome CDP, login state — each with repair hints.",
   [COMMAND_RECOVER]:
-    "Inspect this chat's unanswered turn: what the bridge knows, what is unknown, what was kept, and which actions are available.",
+    "Recover an uncertain bridge turn directly, no assistant turn needed: inspect, recover, or abandon by id. Usage: /chatgpt-recover [inspect|recover|abandon] [session-id] [-bridge gemini] [-reason ...]. Defaults to inspecting this chat.",
 }
 
 export function registerV2Commands(
@@ -191,9 +284,16 @@ export function registerV2Commands(
       description: COMMAND_DESCRIPTIONS[name],
       // v2 command delivery: submit the human-readable report back into the
       // invoking session as a prompt, honoring the requested delivery mode.
+      // Best-effort: the command already did its work before this point, so
+      // a wedged chat that cannot take the report must not turn into a
+      // thrown error. The report is also logged for `opencode logs`.
       execute: async (call) => {
         const text = await run(call)
-        await session.prompt({ ...call.prompt, sessionID: call.sessionID, text, delivery: call.delivery })
+        try {
+          await session.prompt({ ...call.prompt, sessionID: call.sessionID, text, delivery: call.delivery })
+        } catch (error) {
+          console.error(`[${name}] report delivery failed (work already done): ${error}`)
+        }
       },
     })
   }
@@ -275,7 +375,9 @@ export async function setup(
     context.mcp.reload().catch(() => {})
   })
 
-  const executions = buildV2CommandExecutions(state)
+  const executions = buildV2CommandExecutions(state, loginFlow, {
+    geminiBaseURL: gemini?.adapterBaseURL,
+  })
   await context.command.transform((editor) => {
     registerV2Commands(editor, context.session, executions)
   })

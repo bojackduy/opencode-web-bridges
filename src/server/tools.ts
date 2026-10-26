@@ -168,16 +168,32 @@ export type AdapterRequest = (
 ) => Promise<{ status: number; text: string }>
 
 function adapterRequest(opts: ResolvedOptions): AdapterRequest {
-  return (method, reqPath, session, body, timeoutMs) =>
-    httpJSON(
-      opts.adapterHost,
-      opts.adapterPort,
+  return bridgeRequest(`http://${opts.adapterHost}:${opts.adapterPort}/v1`)
+}
+
+/**
+ * One adapter call against an explicit base URL. The ChatGPT and Gemini
+ * adapters share the recovery endpoint shapes, so one helper serves both.
+ */
+export function bridgeRequest(baseURL: string): AdapterRequest {
+  const url = new URL(baseURL)
+  if (url.protocol !== "http:") throw new Error("adapter baseURL must be http")
+  const prefix = url.pathname.replace(/\/$/, "")
+  return (method, reqPath, session, body, timeoutMs) => {
+    // Adapter base URLs end in /v1 and request paths start with /v1/;
+    // join without doubling the prefix.
+    const path =
+      prefix !== "" && !reqPath.startsWith(prefix + "/") ? prefix + reqPath : reqPath
+    return httpJSON(
+      url.hostname,
+      Number(url.port) || 80,
       method,
-      reqPath,
+      path,
       { "x-opencode-session-id": session },
       body,
       timeoutMs,
     )
+  }
 }
 
 const RECOVER_ACTIONS: RecoverAction[] = ["inspect", "recover", "abandon"]
