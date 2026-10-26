@@ -184,7 +184,7 @@ One content-free line is logged per turn:
 | `no matching user message` | the streamed user text is not this prompt (a `user_candidates=...` line reports sizes only) |
 | `assistant lineage` | no assistant message reaches the prompt through its parent chain |
 | `completion conversation mismatch` | the completion names a different conversation than the answer |
-| `unsupported patch` | a patch could have changed the answer body or its identity and was not applied |
+| `unsupported patch` | a patch could have changed the answer body or its identity and was not applied (unknown ops such as `move`; `remove` of identity-neutral metadata is accepted) |
 | `stream aborted`, `stream unavailable`, `listener panic` | transport or listener failure; the DOM path still decides the turn |
 
 `match=true` means the reconstruction equals the delivered answer. A `false`

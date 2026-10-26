@@ -94,7 +94,7 @@ authoritative and the journal only records what was actually submitted:
 | --- | --- | --- |
 | extends the committed history | `append` | only the new messages are sent, `parent_message_id` = last reply |
 | same request after a failed turn | `retry` | the remote transcript is read back; nothing is resent |
-| anything else (revert, edit, fork, model switch, compact) | `reseed` | fresh remote session, whole history rendered once |
+| anything else (revert, edit, fork, model switch, compact) | `reseed` | fresh remote session, newest history rendered within budget (oldest trimmed first, newest turn never dropped) |
 
 So there is no uncertain state to recover from: at worst you pay one reseed.
 Logs are content-free (`plan=`, message counts, `prompt_bytes`, `tool_calls`,
