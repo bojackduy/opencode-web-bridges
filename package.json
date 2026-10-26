@@ -22,6 +22,7 @@
     "bin",
     "dist",
     "commands",
+    "tui.js",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
@@ -43,13 +44,17 @@
     },
     "./server": {
       "import": "./dist/server.js"
+    },
+    "./tui": {
+      "import": "./dist/tui.js"
     }
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build:server": "bun build src/server/plugin.ts --outfile dist/server.js --target bun --external @opencode-ai/plugin --external @opencode-ai/plugin/tool",
+    "build:tui": "bun build src/server/tui.ts --outfile dist/tui.js --target bun",
     "build:installer": "bun build src/installer/install.ts --outfile dist/install.js --target node --external jsonc-parser",
-    "build": "bun run build:server && bun run build:installer",
+    "build": "bun run build:server && bun run build:tui && bun run build:installer",
     "clean": "rm -rf dist",
     "prepack": "bun run typecheck && bun test && bun run build",
     "test": "bun test",
