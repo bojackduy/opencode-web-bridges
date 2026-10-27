@@ -8,6 +8,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { spawn, type ChildProcess } from "node:child_process"
 import type { ResolvedOptions } from "./options"
+import { errorHead, flowNow, logFlow } from "./flow-log"
 
 export interface ProbeResult {
   ok: boolean
@@ -235,12 +236,18 @@ export function startSupervisor(opts: ResolvedOptions, binaries: { openai: strin
     } catch {
       out = undefined
     }
+    const startedAt = flowNow()
     const proc = spawn(command, args, {
       detached: true,
       stdio: [ "ignore", out ?? "ignore", out ?? "ignore" ],
       env,
     })
     proc.unref()
+    logFlow("supervisor", "spawn", {
+      name,
+      pid: proc.pid,
+      extra: `argv=${args.length} log=${path.basename(logFile)}`,
+    })
     if (out !== undefined) {
       try {
         fs.closeSync(out)
@@ -249,7 +256,13 @@ export function startSupervisor(opts: ResolvedOptions, binaries: { openai: strin
       }
     }
     children.push({ proc, logFile })
-    proc.once("exit", () => {
+    proc.once("exit", (code, signal) => {
+      logFlow("supervisor", "exit", {
+        name,
+        pid: proc.pid,
+        status: typeof code === "number" ? code : undefined,
+        extra: `signal=${signal ?? "none"} uptimeMs=${flowNow() - startedAt}`,
+      })
       if (stopped) return
       // Respawn with backoff while the plugin lives.
       setTimeout(() => {
@@ -265,9 +278,11 @@ export function startSupervisor(opts: ResolvedOptions, binaries: { openai: strin
     // which resolves on every platform (on win32: %USERPROFILE%\.chatgpt-proxy)
     // — no per-OS profile handling needed here.
     const cdp = await probeChromeCDP(opts.cdpPort)
+    let launched: string | undefined
     if (!cdp.ok) {
       const chrome = findChromeBinary()
       if (chrome) {
+        launched = "chrome"
         launch("chrome", chrome, [
           `--remote-debugging-port=${opts.cdpPort}`,
           `--user-data-dir=${opts.profileDir}`,
@@ -278,7 +293,9 @@ export function startSupervisor(opts: ResolvedOptions, binaries: { openai: strin
       }
     }
     // (a) Adapter.
-    if (!(await tcpProbe(opts.adapterHost, opts.adapterPort, 1000))) {
+    const adapterUp = await tcpProbe(opts.adapterHost, opts.adapterPort, 1000)
+    if (!adapterUp) {
+      launched = launched ? `${launched}+chatgpt-openai` : "chatgpt-openai"
       const env: NodeJS.ProcessEnv = {
         ...process.env,
         ...(opts.projectPerSession ? { CHATGPT_BRIDGE_PROJECT_PER_SESSION: "1" } : {}),
@@ -296,8 +313,12 @@ export function startSupervisor(opts: ResolvedOptions, binaries: { openai: strin
       if (opts.bridgeSource) console.log(`[opencode-web-bridges] selected source adapter executable: ${binaries.openai}`)
     } else if (opts.bridgeSource && !sourceConflictReported && !children.some(c => c.proc.spawnfile === binaries.openai && c.proc.exitCode === null)) {
       sourceConflictReported = true
+      logFlow("supervisor", "port-conflict", { extra: "source build not verified as running" })
       console.error(`[opencode-web-bridges] adapter port already occupied by an independently running process; selected source build is NOT verified as running: ${binaries.openai}. Ask the service owner to stop/reconfigure it, then restart OpenCode. No launchd/service was killed or overwritten.`)
     }
+    logFlow("supervisor", "reconcile", {
+      extra: `cdpOk=${cdp.ok} adapterUp=${adapterUp} launched=${launched ?? "none"}`,
+    })
   }
 
   // Initial ensure + periodic reconciliation (60s). Timer is unref'd and

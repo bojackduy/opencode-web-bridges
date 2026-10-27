@@ -15,6 +15,7 @@ import {
   tcpProbe,
   describeError,
 } from "./supervisor"
+import { errorHead, flowNow, logFlow } from "./flow-log"
 
 export interface DoctorLine {
   name: string
@@ -179,20 +180,53 @@ export function bridgeRequest(baseURL: string): AdapterRequest {
   const url = new URL(baseURL)
   if (url.protocol !== "http:") throw new Error("adapter baseURL must be http")
   const prefix = url.pathname.replace(/\/$/, "")
-  return (method, reqPath, session, body, timeoutMs) => {
+  return async (method, reqPath, session, body, timeoutMs) => {
     // Adapter base URLs end in /v1 and request paths start with /v1/;
     // join without doubling the prefix.
     const path =
       prefix !== "" && !reqPath.startsWith(prefix + "/") ? prefix + reqPath : reqPath
-    return httpJSON(
-      url.hostname,
-      Number(url.port) || 80,
-      method,
-      path,
-      { "x-opencode-session-id": session },
-      body,
-      timeoutMs,
-    )
+    // Content-free: byte counts and status only, never the body text.
+    let reqBytes = 0
+    try {
+      reqBytes = body === undefined ? 0 : JSON.stringify(body).length
+    } catch {
+      reqBytes = -1
+    }
+    const start = flowNow()
+    logFlow("adapter-http", "start", { method, path, session, reqBytes })
+    try {
+      const res = await httpJSON(
+        url.hostname,
+        Number(url.port) || 80,
+        method,
+        path,
+        { "x-opencode-session-id": session },
+        body,
+        timeoutMs,
+      )
+      logFlow("adapter-http", "end", {
+        method,
+        path,
+        session,
+        reqBytes,
+        status: res.status,
+        respBytes: res.text.length,
+        durationMs: flowNow() - start,
+        ok: res.status >= 200 && res.status < 300,
+      })
+      return res
+    } catch (error) {
+      logFlow("adapter-http", "error", {
+        method,
+        path,
+        session,
+        reqBytes,
+        durationMs: flowNow() - start,
+        ok: false,
+        error: errorHead(error),
+      })
+      throw error
+    }
   }
 }
 
@@ -493,7 +527,7 @@ export function formatAbandon(session: string, s: Record<string, unknown>): stri
  * session, an unreachable adapter and an adapter refusal are all reports, not
  * thrown errors.
  */
-export async function recoverReport(
+async function recoverReportImpl(
   opts: ResolvedOptions,
   args: RecoverArgs,
   callingSession?: string,
@@ -536,5 +570,45 @@ export async function recoverReport(
     return formatAbandon(session, body)
   } catch (error) {
     return unreachableReport(raw, error)
+  }
+}
+
+/**
+ * One user-facing recovery action against the managed adapter. `callingSession`
+ * is the session id OpenCode attached to the call (or the v2 command's
+ * session). Resolves to a plain-English report in every case — a missing
+ * session, an unreachable adapter and an adapter refusal are all reports, not
+ * thrown errors. The flow log records the action, session, duration and the
+ * report's head line (our own template text) so a later bug can be traced.
+ */
+export async function recoverReport(
+  opts: ResolvedOptions,
+  args: RecoverArgs,
+  callingSession?: string,
+  request: AdapterRequest = adapterRequest(opts),
+): Promise<string> {
+  const action = ((args.action ?? "inspect").trim().toLowerCase() || "inspect")
+  const session = (args.session ?? "").trim() || (callingSession ?? "").trim() || "unknown"
+  const start = flowNow()
+  logFlow("plugin", "recover.start", { action, session })
+  try {
+    const report = await recoverReportImpl(opts, args, callingSession, request)
+    logFlow("plugin", "recover.end", {
+      action,
+      session,
+      durationMs: flowNow() - start,
+      ok: true,
+      outcome: report.split("\n")[0]?.slice(0, 160),
+    })
+    return report
+  } catch (error) {
+    logFlow("plugin", "recover.end", {
+      action,
+      session,
+      durationMs: flowNow() - start,
+      ok: false,
+      error: errorHead(error),
+    })
+    throw error
   }
 }

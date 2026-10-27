@@ -19,11 +19,28 @@ import {
   probeReadiness,
 } from "./supervisor"
 import { doctorReport, formatDoctor, loginFlow, recoverReport, statusReport } from "./tools"
+import { errorHead, flowNow, logFlow } from "./flow-log"
 import { setup as setupV2 } from "./v2"
 import { resolveGemini, applyGeminiConfig } from "./gemini"
 import { resolveDeepseek, applyDeepseekConfig } from "./deepseek"
 
 const PLUGIN_ID = "opencode-web-bridges"
+
+/** Trace one agent tool call: start/end with duration and outcome head. */
+async function tracedTool<T>(tool: string, session: string | undefined, run: () => Promise<T>): Promise<T> {
+  const id = session?.trim() || "unknown"
+  const start = flowNow()
+  logFlow("agent-tool", "start", { tool, session: id })
+  try {
+    const out = await run()
+    const head = typeof out === "string" ? out.split("\n")[0]?.slice(0, 160) : typeof out
+    logFlow("agent-tool", "end", { tool, session: id, durationMs: flowNow() - start, ok: true, outcome: head })
+    return out
+  } catch (error) {
+    logFlow("agent-tool", "end", { tool, session: id, durationMs: flowNow() - start, ok: false, error: errorHead(error) })
+    throw error
+  }
+}
 
 const server = async (
   _input: PluginInput,
@@ -75,32 +92,38 @@ const server = async (
       "chatgpt-status": tool({
         description: "Show ChatGPT Web bridge status: readiness, login state, binary versions.",
         args: {},
-        execute: async () => {
-          if (!state.binaries) {
-            return state.binaryError
-              ? `Binaries not ready: ${state.binaryError}`
-              : "Binaries still downloading — retry in a few seconds."
-          }
-          return await statusReport(state.opts, state.binaries)
+        execute: async (_args, context) => {
+          return await tracedTool("chatgpt-status", (context as { sessionID?: string } | undefined)?.sessionID, async () => {
+            if (!state.binaries) {
+              return state.binaryError
+                ? `Binaries not ready: ${state.binaryError}`
+                : "Binaries still downloading — retry in a few seconds."
+            }
+            return await statusReport(state.opts, state.binaries)
+          })
         },
       }),
       "chatgpt-login": tool({
         description: "Launch the profile Chrome window for one-time ChatGPT login, then re-probe readiness.",
         args: {},
-        execute: async () => {
-          return await loginFlow(state.opts)
+        execute: async (_args, context) => {
+          return await tracedTool("chatgpt-login", (context as { sessionID?: string } | undefined)?.sessionID, async () => {
+            return await loginFlow(state.opts)
+          })
         },
       }),
       "chatgpt-doctor": tool({
         description: "Diagnose the ChatGPT Web bridge: binaries, ports, Chrome CDP, login state — each with repair hints.",
         args: {},
-        execute: async () => {
-          if (!state.binaries) {
-            return state.binaryError
-              ? `Binaries not ready: ${state.binaryError}`
-              : "Binaries still downloading — retry in a few seconds."
-          }
-          return formatDoctor(await doctorReport(state.opts, state.binaries))
+        execute: async (_args, context) => {
+          return await tracedTool("chatgpt-doctor", (context as { sessionID?: string } | undefined)?.sessionID, async () => {
+            if (!state.binaries) {
+              return state.binaryError
+                ? `Binaries not ready: ${state.binaryError}`
+                : "Binaries still downloading — retry in a few seconds."
+            }
+            return formatDoctor(await doctorReport(state.opts, state.binaries))
+          })
         },
       }),
       "chatgpt-recover": tool({
@@ -121,12 +144,14 @@ const server = async (
             .describe("Why the turn is being cleared. Only meaningful with action 'abandon'."),
         },
         execute: async (args, context) => {
-          if (!state.binaries) {
-            return state.binaryError
-              ? `Binaries not ready: ${state.binaryError}`
-              : "Binaries still downloading — retry in a few seconds."
-          }
-          return await recoverReport(state.opts, args, context.sessionID)
+          return await tracedTool("chatgpt-recover", context.sessionID, async () => {
+            if (!state.binaries) {
+              return state.binaryError
+                ? `Binaries not ready: ${state.binaryError}`
+                : "Binaries still downloading — retry in a few seconds."
+            }
+            return await recoverReport(state.opts, args, context.sessionID)
+          })
         },
       }),
     },

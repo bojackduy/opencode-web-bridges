@@ -31,6 +31,7 @@ import {
   type AdapterRequest,
   type RecoverArgs,
 } from "./tools"
+import { errorHead, flowNow, logFlow } from "./flow-log"
 
 // ---------------------------------------------------------------------------
 // Minimal structural mirror of the SDK TUI shapes this module touches.
@@ -204,7 +205,28 @@ async function fetchState(
 
 // ---------------------------------------------------------------------------
 // Command implementations (all display via dialog/toast — never session.prompt)
+//
+// Every palette run is bracketed in the flow log: palette.start on invoke,
+// palette.session once the target chat is known, palette.end with the
+// outcome (shown / cancelled / busy / not-applicable / unreachable).
 // ---------------------------------------------------------------------------
+
+/** Bracket one palette run in the flow log; outcome is a short fixed word. */
+async function tracedPalette(command: string, run: () => Promise<{ session?: string; outcome: string }>): Promise<void> {
+  const start = flowNow()
+  logFlow("palette", "start", { command })
+  try {
+    const { session = "unknown", outcome } = await run()
+    logFlow("palette", "end", { command, session, durationMs: flowNow() - start, ok: true, outcome })
+  } catch (error) {
+    logFlow("palette", "end", { command, durationMs: flowNow() - start, ok: false, error: errorHead(error) })
+    throw error
+  }
+}
+
+function paletteSession(command: string, session: string): void {
+  logFlow("palette", "session", { command, session })
+}
 
 async function runInspect(
   deps: RecoveryDeps,
@@ -217,6 +239,7 @@ async function runInspect(
     ui.toast.show({ message: "Recovery cancelled — no chat named.", variant: "info" })
     return
   }
+  paletteSession("bridge-recovery.inspect", session)
   const report = await recoverReport(deps.adapters.opts, { action: "inspect", session }, session, request)
   await ui.dialog.alert({ title: `Bridge recovery — inspect (${bridgeName})`, message: report })
 }
@@ -228,6 +251,7 @@ async function runRecoverChatgpt(deps: RecoveryDeps, request: AdapterRequest): P
     ui.toast.show({ message: "Recovery cancelled — no chat named.", variant: "info" })
     return
   }
+  paletteSession("bridge-recovery.recover", session)
   if (sessionBusy(data, session)) {
     await ui.dialog.alert({
       title: "Bridge recovery — read back",
@@ -277,6 +301,7 @@ async function runAbandon(
     ui.toast.show({ message: "Abandon cancelled — no chat named.", variant: "info" })
     return
   }
+  paletteSession("bridge-recovery.abandon", session)
   if (sessionBusy(data, session)) {
     await ui.dialog.alert({
       title: `Bridge recovery — abandon (${bridgeName})`,
@@ -496,6 +521,7 @@ async function runRecheckChatgpt(deps: RecoveryDeps, request: AdapterRequest): P
     ui.toast.show({ message: "Recheck cancelled — no chat named.", variant: "info" })
     return
   }
+  paletteSession("bridge-recovery.recheck", session)
   if (sessionBusy(data, session)) {
     await ui.dialog.alert({
       title: "Bridge recovery — recheck rejected reply",
@@ -543,6 +569,7 @@ async function runCorrectChatgpt(deps: RecoveryDeps, request: AdapterRequest): P
     ui.toast.show({ message: "Correction cancelled — no chat named.", variant: "info" })
     return
   }
+  paletteSession("bridge-recovery.correct", session)
   if (sessionBusy(data, session)) {
     await ui.dialog.alert({
       title: "Bridge recovery — ask ChatGPT to fix the reply",
@@ -598,7 +625,10 @@ export function buildRecoveryCommands(deps: RecoveryDeps): PaletteCommand[] {
       description: "Read-only: what the bridge knows, what is unknown, what was kept.",
       group: RECOVERY_GROUP,
       palette: true,
-      run: () => runInspect(deps, request, "ChatGPT"),
+      run: () => tracedPalette(CMD_INSPECT_CHATGPT, async () => {
+        await runInspect(deps, request, "ChatGPT")
+        return { outcome: "dialog-shown" }
+      }),
     })
     out.push({
       id: CMD_RECOVER_CHATGPT,
@@ -606,7 +636,10 @@ export function buildRecoveryCommands(deps: RecoveryDeps): PaletteCommand[] {
       description: "Read-only adoption of the pending reply. Never resends. Asks first.",
       group: RECOVERY_GROUP,
       palette: true,
-      run: () => runRecoverChatgpt(deps, request),
+      run: () => tracedPalette(CMD_RECOVER_CHATGPT, async () => {
+        await runRecoverChatgpt(deps, request)
+        return { outcome: "dialog-shown" }
+      }),
     })
     out.push({
       id: CMD_RECHECK_CHATGPT,
@@ -614,7 +647,10 @@ export function buildRecoveryCommands(deps: RecoveryDeps): PaletteCommand[] {
       description: "Read-only: re-read the exact rejected reply and validate it again. Never resends.",
       group: RECOVERY_GROUP,
       palette: true,
-      run: () => runRecheckChatgpt(deps, request),
+      run: () => tracedPalette(CMD_RECHECK_CHATGPT, async () => {
+        await runRecheckChatgpt(deps, request)
+        return { outcome: "dialog-shown" }
+      }),
     })
     out.push({
       id: CMD_CORRECT_CHATGPT,
@@ -622,7 +658,10 @@ export function buildRecoveryCommands(deps: RecoveryDeps): PaletteCommand[] {
       description: "Sends ONE correction message, after you confirm. Never resends your task or runs a tool.",
       group: RECOVERY_GROUP,
       palette: true,
-      run: () => runCorrectChatgpt(deps, request),
+      run: () => tracedPalette(CMD_CORRECT_CHATGPT, async () => {
+        await runCorrectChatgpt(deps, request)
+        return { outcome: "dialog-shown" }
+      }),
     })
     out.push({
       id: CMD_ABANDON_CHATGPT,
@@ -630,7 +669,10 @@ export function buildRecoveryCommands(deps: RecoveryDeps): PaletteCommand[] {
       description: "Clears only the uncertainty binding. Asks first; never re-runs tools.",
       group: RECOVERY_GROUP,
       palette: true,
-      run: () => runAbandon(deps, request, "ChatGPT", undefined, undefined),
+      run: () => tracedPalette(CMD_ABANDON_CHATGPT, async () => {
+        await runAbandon(deps, request, "ChatGPT", undefined, undefined)
+        return { outcome: "dialog-shown" }
+      }),
     })
   }
   if (adapters.gemini) {
@@ -641,7 +683,10 @@ export function buildRecoveryCommands(deps: RecoveryDeps): PaletteCommand[] {
       description: "Read-only: pending state, counts and available moves.",
       group: RECOVERY_GROUP,
       palette: true,
-      run: () => runInspect(deps, request, "Gemini"),
+      run: () => tracedPalette(CMD_INSPECT_GEMINI, async () => {
+        await runInspect(deps, request, "Gemini")
+        return { outcome: "dialog-shown" }
+      }),
     })
     out.push({
       id: CMD_ABANDON_GEMINI,
@@ -649,7 +694,10 @@ export function buildRecoveryCommands(deps: RecoveryDeps): PaletteCommand[] {
       description: "Clears only the uncertainty binding. Asks first; never re-runs tools.",
       group: RECOVERY_GROUP,
       palette: true,
-      run: () => runAbandon(deps, request, "Gemini", undefined, undefined),
+      run: () => tracedPalette(CMD_ABANDON_GEMINI, async () => {
+        await runAbandon(deps, request, "Gemini", undefined, undefined)
+        return { outcome: "dialog-shown" }
+      }),
     })
   }
   return out

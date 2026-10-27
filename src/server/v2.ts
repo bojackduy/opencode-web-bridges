@@ -18,6 +18,7 @@ import { ensureShared, type SharedState } from "./shared"
 import { assetName, cacheDir, currentPlatform } from "./binaries"
 import { loginInstructions, probeReadiness } from "./supervisor"
 import { doctorReport, formatDoctor, loginFlow, recoverReport, statusReport } from "./tools"
+import { errorHead, flowNow, logFlow } from "./flow-log"
 import { bridgeRequest } from "./tools"
 import type { RecoverArgs } from "./tools"
 import { resolveGemini, registerGeminiV2Provider, registerGeminiV2Mcp } from "./gemini"
@@ -224,19 +225,41 @@ export function buildV2CommandExecutions(
     state.binaryError
       ? `Binaries not ready: ${state.binaryError}`
       : "Binaries still downloading — retry in a few seconds."
+  // Trace one v2 command execution: the work runs here in the plugin host,
+  // so start/end with duration brackets the whole direct execution.
+  const traced = <T extends unknown[], R>(
+    command: string,
+    run: (...args: T) => Promise<R>,
+  ): ((...args: T) => Promise<R>) => {
+    return async (...args: T): Promise<R> => {
+      const call = args[0] as { sessionID?: string } | undefined
+      const session = call?.sessionID?.trim() || "unknown"
+      const start = flowNow()
+      logFlow("plugin", "command.start", { command, session })
+      try {
+        const out = await run(...args)
+        const head = typeof out === "string" ? out.split("\n")[0]?.slice(0, 160) : typeof out
+        logFlow("plugin", "command.end", { command, session, durationMs: flowNow() - start, ok: true, outcome: head })
+        return out
+      } catch (error) {
+        logFlow("plugin", "command.end", { command, session, durationMs: flowNow() - start, ok: false, error: errorHead(error) })
+        throw error
+      }
+    }
+  }
   return {
-    [COMMAND_STATUS]: async () =>
-      state.binaries ? statusReport(state.opts, state.binaries) : pending(),
-    [COMMAND_LOGIN]: async () => login(state.opts),
-    [COMMAND_DOCTOR]: async () =>
-      state.binaries ? formatDoctor(await doctorReport(state.opts, state.binaries)) : pending(),
+    [COMMAND_STATUS]: traced(COMMAND_STATUS, async () =>
+      state.binaries ? statusReport(state.opts, state.binaries) : pending()),
+    [COMMAND_LOGIN]: traced(COMMAND_LOGIN, async () => login(state.opts)),
+    [COMMAND_DOCTOR]: traced(COMMAND_DOCTOR, async () =>
+      state.binaries ? formatDoctor(await doctorReport(state.opts, state.binaries)) : pending()),
     // A v2 command carries typed arguments in the invocation text after the
     // command name; the calling chat is the default session. The recovery
     // HTTP calls run right here in the plugin host — no assistant turn is
     // spent doing the work. Only the human-readable report travels back
     // through session.prompt, and that delivery is best-effort: on a wedged
     // chat the work is already done, so a failed delivery must not throw.
-    [COMMAND_RECOVER]: async (call) => {
+    [COMMAND_RECOVER]: traced(COMMAND_RECOVER, async (call) => {
       if (!state.binaries) return pending()
       const invocation = parseRecoverInvocation(call.prompt?.text ?? "")
       if (invocation.bridge === "gemini") {
@@ -258,7 +281,7 @@ export function buildV2CommandExecutions(
         )
       }
       return recoverReport(state.opts, invocation.args, call.sessionID)
-    },
+    }),
   }
 }
 
