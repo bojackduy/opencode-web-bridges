@@ -247,7 +247,11 @@ export function resolveRecoverSession(
 // One plain-English sentence plus an actionable next step, keyed by how the
 // adapter refused. The status itself is never the headline; it goes in the
 // detail line below the report.
-function failureAdvice(action: RecoverAction, status: number): { sentence: string; next: string } {
+function failureAdvice(
+  action: RecoverAction,
+  status: number,
+  adapterMessage: string,
+): { sentence: string; next: string } {
   if (status === 403) {
     return {
       sentence: "The bridge refused: this request looked like it came from a web page instead of OpenCode.",
@@ -290,6 +294,22 @@ function failureAdvice(action: RecoverAction, status: number): { sentence: strin
         }
   }
   if (status === 409) {
+    if (action === "recover" && adapterMessage.includes("MISMATCH")) {
+      // The sent-log proves the thread never received the exact pending
+      // message (typically an interrupted multi-chunk submission), so no
+      // amount of retrying will make a reply readable for it.
+      return {
+        sentence:
+          "Your message never reached ChatGPT in full: the thread holds something else, so there is no reply that belongs to it.",
+        next: "This turn cannot be read back and retrying will not change that. Clear it — start a new chat from the recorded history, or clear the unconfirmed turn — then send a new message; completed messages are kept.",
+      }
+    }
+    if (action === "recover" && adapterMessage.includes("not fully rendered yet")) {
+      return {
+        sentence: "The saved ChatGPT page had not finished drawing that turn, so it could not be compared yet.",
+        next: "Nothing was re-sent and no tool was run. Wait a few seconds, then run recovery again.",
+      }
+    }
     if (action === "recover") {
       return {
         sentence: "The bridge could not match the unanswered message to a saved reply, so there is nothing it can read back.",
@@ -308,7 +328,7 @@ function failureAdvice(action: RecoverAction, status: number): { sentence: strin
 }
 
 function failureReport(action: RecoverAction, status: number, adapterMessage: string): string {
-  const advice = failureAdvice(action, status)
+  const advice = failureAdvice(action, status, adapterMessage)
   const said = adapterMessage === "" ? "" : ` The bridge said: ${adapterMessage}`
   return [advice.sentence, advice.next, "", `Details: the bridge answered with status ${status}.${said}`].join("\n")
 }

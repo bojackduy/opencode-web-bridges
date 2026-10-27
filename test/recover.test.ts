@@ -205,6 +205,36 @@ describe("recover", () => {
     expect(headline).not.toContain("409")
     expect(out).toContain("status 409")
   })
+
+  test("an interrupted chunked submission says the message never arrived in full", async () => {
+    const out = await recoverReport(
+      OPTS,
+      { action: "recover" },
+      "ses_1",
+      fakeAdapter(409, {
+        error: {
+          message:
+            "recovery user boundary not fully rendered yet; retry; sent-log: MISMATCH last submit 2128ac9d (190172B chunk 1/8 interrupted) vs pending f638f186",
+        },
+      }),
+    )
+    const [headline, next] = out.split("\n")
+    expect(headline).toContain("never reached ChatGPT in full")
+    expect(next).toContain("Clear it")
+    expect(next).not.toContain("inspect")
+  })
+
+  test("an unrendered turn asks for one retry instead of declaring failure", async () => {
+    const out = await recoverReport(
+      OPTS,
+      { action: "recover" },
+      "ses_1",
+      fakeAdapter(409, { error: { message: "recovery user boundary not fully rendered yet; retry" } }),
+    )
+    const [headline, next] = out.split("\n")
+    expect(headline).toContain("had not finished drawing")
+    expect(next).toContain("run recovery again")
+  })
 })
 
 // ─── Abandon ────────────────────────────────────────────────────────────────
