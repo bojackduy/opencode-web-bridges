@@ -472,6 +472,23 @@ function readOnlyHint(reason: string): string {
   return "Next: send a new message to continue."
 }
 
+// notApplicableReport explains why the chosen exact-reply action does not fit
+// this chat, in the terms of the action that was pressed. It replaces a raw
+// state dump: a person who pressed "recheck" needs one sentence, not a report.
+function notApplicableReport(kind: "recheck" | "correct", state: StateView, session: string): string {
+  const verb = kind === "recheck" ? "recheck" : "correct"
+  const nothing = "Nothing was sent and nothing changed."
+  const byState: Record<string, string> = {
+    clean: `Chat ${session} has no unfinished turn, so there is no reply to ${verb}. ${nothing}`,
+    pending_verifiable: `Chat ${session} is not rejected: its last turn is UNCONFIRMED, meaning an answer may exist but was never received. Recheck only re-reads a reply that was rejected, so it does not apply. Use "Bridge recovery: recover ChatGPT turn" to read that answer back without sending anything.`,
+    pending_unverifiable: `Chat ${session} is not rejected: its last turn cannot be read back at all. Recheck and correction do not apply. Use abandon to clear the unconfirmed turn. ${nothing}`,
+    rejected_output: `Chat ${session} holds a rejected reply, but the bridge no longer has its exact turn recorded, so it will not ${verb} whatever is latest. ${nothing}`,
+    empty_final: `Chat ${session} is not rejected: its last reply was empty. There is nothing to ${verb}. ${nothing}`,
+    absent: `Chat ${session} is unknown to the ChatGPT bridge, so there is nothing to ${verb}. ${nothing}`,
+  }
+  return byState[state.state] ?? `Chat ${session} is in state "${state.state}", which has no rejected reply to ${verb}. ${nothing}`
+}
+
 async function runRecheckChatgpt(deps: RecoveryDeps, request: AdapterRequest): Promise<void> {
   const { ui, data } = deps
   const session = await resolveTargetSession(ui)
@@ -488,13 +505,12 @@ async function runRecheckChatgpt(deps: RecoveryDeps, request: AdapterRequest): P
   }
   const state = await fetchState(request, session)
   if (!state.ok || !state.canRecheck) {
-    const report = await recoverReport(
-      deps.adapters.opts,
-      { action: "inspect", session },
-      session,
-      request,
-    )
-    await ui.dialog.alert({ title: "Bridge recovery — recheck rejected reply", message: report })
+    await ui.dialog.alert({
+      title: "Bridge recovery — recheck rejected reply",
+      message: state.ok
+        ? notApplicableReport("recheck", state, session)
+        : `The ChatGPT bridge did not answer for ${session}, so nothing was checked and nothing changed.`,
+    })
     return
   }
   const ok = await ui.dialog.confirm({
@@ -536,13 +552,12 @@ async function runCorrectChatgpt(deps: RecoveryDeps, request: AdapterRequest): P
   }
   const state = await fetchState(request, session)
   if (!state.ok || !state.canCorrect) {
-    const report = await recoverReport(
-      deps.adapters.opts,
-      { action: "inspect", session },
-      session,
-      request,
-    )
-    await ui.dialog.alert({ title: "Bridge recovery — ask ChatGPT to fix the reply", message: report })
+    await ui.dialog.alert({
+      title: "Bridge recovery — ask ChatGPT to fix the reply",
+      message: state.ok
+        ? notApplicableReport("correct", state, session)
+        : `The ChatGPT bridge did not answer for ${session}, so no correction was sent and nothing changed.`,
+    })
     return
   }
   const ok = await ui.dialog.confirm({

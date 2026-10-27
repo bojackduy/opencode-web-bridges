@@ -226,7 +226,7 @@ describe("rejected-reply actions", () => {
       ...extra,
     })
 
-  test("recheck is refused with an inspect report when the bridge cannot recheck", async () => {
+  test("recheck explains itself in one line instead of dumping a state report", async () => {
     const fake = fakeUI()
     const { calls, request } = fakeAdapter((method) =>
       method === "GET" ? rejectedState({ can_recheck: false, actions: ["continue"] }) : { status: 200, text: "{}" },
@@ -234,6 +234,31 @@ describe("rejected-reply actions", () => {
     await runCommand(buildRecoveryCommands(depsFor(fake, { chatgpt: request })), CMD_RECHECK_CHATGPT)
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(0)
     expect(fake.calls.alerts).toHaveLength(1)
+    const message = fake.calls.alerts[0]?.message ?? ""
+    expect(message).toContain("no longer has its exact turn recorded")
+    expect(message).not.toContain("What is kept")
+    expect(message).not.toContain("completed messages")
+  })
+
+  test("an unconfirmed chat is redirected to recover, not shown a state dump", async () => {
+    const fake = fakeUI()
+    const { calls, request } = fakeAdapter((method) =>
+      method === "GET"
+        ? rejectedState({
+            state: "pending_verifiable",
+            can_recover: true,
+            can_recheck: false,
+            can_correct_format: false,
+            actions: ["recover", "resync", "abandon"],
+          })
+        : { status: 200, text: "{}" },
+    )
+    await runCommand(buildRecoveryCommands(depsFor(fake, { chatgpt: request })), CMD_CORRECT_CHATGPT)
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0)
+    const message = fake.calls.alerts[0]?.message ?? ""
+    expect(message).toContain("not rejected")
+    expect(message).toContain("recover ChatGPT turn")
+    expect(message).not.toContain("What is unknown")
   })
 
   test("confirmed recheck posts exactly once and reports what is held", async () => {
