@@ -9,8 +9,10 @@ import {
   buildRecoveryCommands,
   CMD_ABANDON_CHATGPT,
   CMD_ABANDON_GEMINI,
+  CMD_CORRECT_CHATGPT,
   CMD_INSPECT_CHATGPT,
   CMD_INSPECT_GEMINI,
+  CMD_RECHECK_CHATGPT,
   CMD_RECOVER_CHATGPT,
   RECOVERY_GROUP,
   setupTui,
@@ -102,7 +104,15 @@ describe("palette registration", () => {
     const { request } = fakeAdapter(() => ({ status: 200, text: "{}" }))
     const cmds = buildRecoveryCommands(depsFor(fake, { chatgpt: request, gemini: request }))
     expect(cmds.map((c) => c.id).sort()).toEqual(
-      [CMD_INSPECT_CHATGPT, CMD_RECOVER_CHATGPT, CMD_ABANDON_CHATGPT, CMD_INSPECT_GEMINI, CMD_ABANDON_GEMINI].sort(),
+      [
+        CMD_INSPECT_CHATGPT,
+        CMD_RECOVER_CHATGPT,
+        CMD_RECHECK_CHATGPT,
+        CMD_CORRECT_CHATGPT,
+        CMD_ABANDON_CHATGPT,
+        CMD_INSPECT_GEMINI,
+        CMD_ABANDON_GEMINI,
+      ].sort(),
     )
     for (const c of cmds) {
       expect(c.palette).toBe(true)
@@ -201,6 +211,125 @@ describe("guards and confirmations", () => {
     await runCommand(buildRecoveryCommands(depsFor(fake, { chatgpt: request })), CMD_ABANDON_CHATGPT)
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1)
     expect(fake.calls.alerts.map((a) => a.message).join("\n")).toContain("Cleared the unconfirmed turn")
+  })
+})
+
+describe("rejected-reply actions", () => {
+  const rejectedState = (extra: Record<string, unknown> = {}) =>
+    okState({
+      state: "rejected_output",
+      can_recover: false,
+      can_recheck: true,
+      can_correct_format: true,
+      summary: "The model's last reply could not be used.",
+      actions: ["recheck", "correct_format", "continue"],
+      ...extra,
+    })
+
+  test("recheck is refused with an inspect report when the bridge cannot recheck", async () => {
+    const fake = fakeUI()
+    const { calls, request } = fakeAdapter((method) =>
+      method === "GET" ? rejectedState({ can_recheck: false, actions: ["continue"] }) : { status: 200, text: "{}" },
+    )
+    await runCommand(buildRecoveryCommands(depsFor(fake, { chatgpt: request })), CMD_RECHECK_CHATGPT)
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0)
+    expect(fake.calls.alerts).toHaveLength(1)
+  })
+
+  test("confirmed recheck posts exactly once and reports what is held", async () => {
+    const fake = fakeUI({ type: "session", sessionID: "ses_1" }, { confirm: true })
+    const { calls, request } = fakeAdapter((method) => {
+      if (method === "GET") return rejectedState()
+      return {
+        status: 200,
+        text: JSON.stringify({ rechecked: true, cached_tool_calls: 1, response_bytes: 64 }),
+      }
+    })
+    await runCommand(buildRecoveryCommands(depsFor(fake, { chatgpt: request })), CMD_RECHECK_CHATGPT)
+    const posts = calls.filter((c) => c.method === "POST")
+    expect(posts).toHaveLength(1)
+    expect(posts[0]?.path).toBe("/v1/sessions/recheck")
+    const message = fake.calls.alerts.map((a) => a.message).join("\n")
+    expect(message).toContain("Checked again")
+    expect(message).toContain("does not resume the chat by itself")
+  })
+
+  test("cancelled recheck makes zero mutation calls", async () => {
+    const fake = fakeUI({ type: "session", sessionID: "ses_1" }, { confirm: false })
+    const { calls, request } = fakeAdapter((method) =>
+      method === "GET" ? rejectedState() : { status: 200, text: "{}" },
+    )
+    await runCommand(buildRecoveryCommands(depsFor(fake, { chatgpt: request })), CMD_RECHECK_CHATGPT)
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0)
+    expect(fake.calls.toasts.join(" ")).toContain("nothing changed")
+  })
+
+  test("recheck refusal names the content-free reason", async () => {
+    const fake = fakeUI({ type: "session", sessionID: "ses_1" }, { confirm: true })
+    const { request } = fakeAdapter((method) => {
+      if (method === "GET") return rejectedState()
+      return {
+        status: 422,
+        text: JSON.stringify({ error: { message: "still unusable", details: { reason: "schema_violation" } } }),
+      }
+    })
+    await runCommand(buildRecoveryCommands(depsFor(fake, { chatgpt: request })), CMD_RECHECK_CHATGPT)
+    const message = fake.calls.alerts.map((a) => a.message).join("\n")
+    expect(message).toContain("schema_violation")
+    expect(message).toContain("still unusable")
+  })
+
+  test("confirmed correction submits exactly once and promises no task resend", async () => {
+    const fake = fakeUI({ type: "session", sessionID: "ses_1" }, { confirm: true })
+    const { calls, request } = fakeAdapter((method) => {
+      if (method === "GET") return rejectedState()
+      return {
+        status: 200,
+        text: JSON.stringify({ corrected: true, cached_tool_calls: 1, response_bytes: 80 }),
+      }
+    })
+    await runCommand(buildRecoveryCommands(depsFor(fake, { chatgpt: request })), CMD_CORRECT_CHATGPT)
+    const posts = calls.filter((c) => c.method === "POST")
+    expect(posts).toHaveLength(1)
+    expect(posts[0]?.path).toBe("/v1/sessions/correct-format")
+    const message = fake.calls.alerts.map((a) => a.message).join("\n")
+    expect(message).toContain("Correction sent once")
+    expect(message).toContain("original task was not resent")
+  })
+
+  test("cancelled correction sends nothing", async () => {
+    const fake = fakeUI({ type: "session", sessionID: "ses_1" }, { confirm: false })
+    const { calls, request } = fakeAdapter((method) =>
+      method === "GET" ? rejectedState() : { status: 200, text: "{}" },
+    )
+    await runCommand(buildRecoveryCommands(depsFor(fake, { chatgpt: request })), CMD_CORRECT_CHATGPT)
+    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0)
+    expect(fake.calls.toasts.join(" ")).toContain("nothing was sent")
+  })
+
+  test("a spent correction is reported honestly instead of being resent", async () => {
+    const fake = fakeUI({ type: "session", sessionID: "ses_1" }, { confirm: true })
+    const { request } = fakeAdapter((method) => {
+      if (method === "GET") return rejectedState()
+      return {
+        status: 409,
+        text: JSON.stringify({
+          error: { message: "already asked", details: { reason: "correction_already_spent" } },
+        }),
+      }
+    })
+    await runCommand(buildRecoveryCommands(depsFor(fake, { chatgpt: request })), CMD_CORRECT_CHATGPT)
+    const message = fake.calls.alerts.map((a) => a.message).join("\n")
+    expect(message).toContain("already asked")
+    expect(message).toContain("will not ask a second time")
+  })
+
+  test("gemini never offers the rejected-reply actions", () => {
+    const fake = fakeUI()
+    const { request } = fakeAdapter(() => okState())
+    const ids = buildRecoveryCommands(depsFor(fake, { gemini: request })).map((c) => c.id)
+    expect(ids).not.toContain(CMD_RECHECK_CHATGPT)
+    expect(ids).not.toContain(CMD_CORRECT_CHATGPT)
   })
 })
 

@@ -115,6 +115,8 @@ export const RECOVERY_GROUP = "Bridge recovery"
 
 export const CMD_INSPECT_CHATGPT = "bridge-recovery.inspect-chatgpt"
 export const CMD_RECOVER_CHATGPT = "bridge-recovery.recover-chatgpt"
+export const CMD_RECHECK_CHATGPT = "bridge-recovery.recheck-chatgpt"
+export const CMD_CORRECT_CHATGPT = "bridge-recovery.correct-chatgpt"
 export const CMD_ABANDON_CHATGPT = "bridge-recovery.abandon-chatgpt"
 export const CMD_INSPECT_GEMINI = "bridge-recovery.inspect-gemini"
 export const CMD_ABANDON_GEMINI = "bridge-recovery.abandon-gemini"
@@ -168,6 +170,8 @@ interface StateView {
   state: string
   summary: string
   canRecover: boolean
+  canRecheck: boolean
+  canCorrect: boolean
   actions: string[]
 }
 
@@ -192,6 +196,8 @@ async function fetchState(
     state: str(body.state) || "unknown",
     summary: str(body.summary),
     canRecover: body.can_recover === true,
+    canRecheck: body.can_recheck === true,
+    canCorrect: body.can_correct_format === true,
     actions,
   }
 }
@@ -297,6 +303,275 @@ async function runAbandon(
   await ui.dialog.alert({ title: `Bridge recovery — abandon (${bridgeName})`, message: report })
 }
 
+// ---------------------------------------------------------------------------
+// Exact rejected-reply actions (ChatGPT only)
+//
+// Two DIFFERENT things, deliberately kept apart:
+//   recheck         read-only. Re-reads the exact rejected turn and validates
+//                   the same bytes again. Nothing is sent.
+//   correct-format  exactly ONE explicit human-authorized submission asking
+//                   ChatGPT to repeat the rejected reply in the right format.
+// Neither resumes OpenCode, and neither runs a tool.
+// ---------------------------------------------------------------------------
+
+interface ActionResult {
+  status: number
+  body: Record<string, unknown>
+}
+
+async function postAction(
+  request: AdapterRequest,
+  path: string,
+  session: string,
+  timeoutMs: number,
+): Promise<ActionResult> {
+  const res = await request("POST", path, session, undefined, timeoutMs)
+  let body: Record<string, unknown> = {}
+  try {
+    body = JSON.parse(res.text) as Record<string, unknown>
+  } catch {
+    body = {}
+  }
+  return { status: res.status, body }
+}
+
+function errorField(body: Record<string, unknown>): Record<string, unknown> {
+  const error = body["error"]
+  return error !== null && typeof error === "object" ? (error as Record<string, unknown>) : {}
+}
+
+function errorMessage(body: Record<string, unknown>): string {
+  const message = errorField(body)["message"]
+  return typeof message === "string" ? message : ""
+}
+
+function errorDetail(body: Record<string, unknown>, key: string): string {
+  const details = errorField(body)["details"]
+  if (details === null || typeof details !== "object") return ""
+  const value = (details as Record<string, unknown>)[key]
+  return typeof value === "string" ? value : ""
+}
+
+function heldLine(body: Record<string, unknown>): string {
+  const calls = typeof body["cached_tool_calls"] === "number" ? (body["cached_tool_calls"] as number) : 0
+  const bytes = typeof body["response_bytes"] === "number" ? (body["response_bytes"] as number) : 0
+  const callWord = `${calls} tool call${calls === 1 ? "" : "s"}`
+  return bytes > 0 ? `${bytes} bytes of reply text and ${callWord}` : callWord
+}
+
+const RECHECK_REFUSALS: Record<string, string> = {
+  no_rejected_identity:
+    "The bridge no longer holds the exact rejected reply, so it will not guess by reading whatever is latest.",
+  reply_changed: "The saved reply is not the reply that was rejected, so nothing was cached.",
+  empty_source: "The saved reply is empty, so there is nothing to use.",
+  source_unreadable: "The saved reply could not be read back exactly, so nothing was cached.",
+}
+
+function recheckReport(session: string, result: ActionResult): string {
+  const { status, body } = result
+  if (status === 200) {
+    return [
+      `Checked again: the saved reply for ${session} was read back from ChatGPT, matched the exact reply that was rejected, and passed validation.`,
+      `Held now: ${heldLine(body)}.`,
+      "Nothing was sent to ChatGPT and no tool was run. This does not resume the chat by itself.",
+      "",
+      "Next: send the same message again, unchanged — the bridge returns the stored reply.",
+    ].join("\n")
+  }
+  const reason = errorDetail(body, "reason")
+  if (status === 422) {
+    return [
+      `Checked again: the saved reply for ${session} is still unusable${reason ? ` (${reason})` : ""}.`,
+      "Nothing was cached, nothing was sent and no tool was run.",
+      "Next: ask ChatGPT to fix the reply format, or send a new message to continue.",
+    ].join("\n")
+  }
+  if (status === 409) {
+    return [
+      RECHECK_REFUSALS[reason] ?? "The bridge could not recheck this chat in its current state.",
+      "Nothing was sent, nothing was cached and no tool was run.",
+    ].join("\n")
+  }
+  if (status === 403) {
+    return "The bridge refused: this request looked like it came from a web page instead of OpenCode. Nothing changed."
+  }
+  if (status === 503) {
+    return "The bridge is busy with a live reply, so nothing was checked. Wait for idle, then run this again."
+  }
+  const said = errorMessage(body)
+  return [
+    "The bridge did not complete the recheck.",
+    said === "" ? "" : `The bridge said: ${said}`,
+    `Details: status ${status}.`,
+  ]
+    .filter((line) => line !== "")
+    .join("\n")
+}
+
+const CORRECTION_REFUSALS: Record<string, string> = {
+  correction_already_spent:
+    "A correction was already asked for this reply, and the bridge will not ask a second time.",
+  no_rejected_identity:
+    "The bridge no longer holds the exact rejected reply, so it will not ask for a correction.",
+  no_rejected_sample:
+    "The bridge could not read the rejected reply back to quote it, so it will not ask for a correction.",
+  correction_uncertain:
+    "The correction could not be confirmed, so this chat now holds an unknown turn. Nothing was run.",
+  empty_source: "The corrected reply came back empty, so nothing could be used.",
+}
+
+function correctionReport(session: string, result: ActionResult): string {
+  const { status, body } = result
+  if (status === 200) {
+    return [
+      `Correction sent once for ${session}: ChatGPT was asked to repeat the rejected reply in the exact format. Your original task was not resent.`,
+      `Held now: ${heldLine(body)}.`,
+      "No tool was run, and this does not resume the chat by itself.",
+      "",
+      "Next: send the same message again, unchanged — the bridge returns the stored reply.",
+    ].join("\n")
+  }
+  const reason = errorDetail(body, "reason")
+  if (status === 422) {
+    const refusal = CORRECTION_REFUSALS[reason]
+    if (refusal !== undefined) {
+      return [refusal, "Nothing was executed and no tool was run.", readOnlyHint(reason)].join("\n")
+    }
+    return [
+      `The corrected reply for ${session} is still unusable${reason ? ` (${reason})` : ""}.`,
+      "It was not cached and no tool was run. A second correction will not be sent for this reply.",
+      "Next: send a new message to continue.",
+    ].join("\n")
+  }
+  if (status === 409) {
+    return [
+      CORRECTION_REFUSALS[reason] ?? "The bridge could not send a correction for this chat in its current state.",
+      "Nothing was sent and no tool was run.",
+    ].join("\n")
+  }
+  if (status === 403) {
+    return "The bridge refused: this request looked like it came from a web page instead of OpenCode. Nothing was sent."
+  }
+  if (status === 503) {
+    return "The bridge is busy with a live reply, so nothing was sent. Wait for idle, then run this again."
+  }
+  const said = errorMessage(body)
+  return [
+    "The bridge did not complete the correction.",
+    said === "" ? "" : `The bridge said: ${said}`,
+    `Details: status ${status}.`,
+  ]
+    .filter((line) => line !== "")
+    .join("\n")
+}
+
+function readOnlyHint(reason: string): string {
+  if (reason === "correction_uncertain" || reason === "correction_already_spent") {
+    return "Next: use the read-only recheck, or send a new message."
+  }
+  return "Next: send a new message to continue."
+}
+
+async function runRecheckChatgpt(deps: RecoveryDeps, request: AdapterRequest): Promise<void> {
+  const { ui, data } = deps
+  const session = await resolveTargetSession(ui)
+  if (!session) {
+    ui.toast.show({ message: "Recheck cancelled — no chat named.", variant: "info" })
+    return
+  }
+  if (sessionBusy(data, session)) {
+    await ui.dialog.alert({
+      title: "Bridge recovery — recheck rejected reply",
+      message: `Chat ${session} has a live turn. Wait for idle, then run this again. Nothing was checked and nothing changed.`,
+    })
+    return
+  }
+  const state = await fetchState(request, session)
+  if (!state.ok || !state.canRecheck) {
+    const report = await recoverReport(
+      deps.adapters.opts,
+      { action: "inspect", session },
+      session,
+      request,
+    )
+    await ui.dialog.alert({ title: "Bridge recovery — recheck rejected reply", message: report })
+    return
+  }
+  const ok = await ui.dialog.confirm({
+    title: "Bridge recovery — recheck rejected reply",
+    message: `Read the saved reply for ${session} back from ChatGPT and check it again? Nothing is sent to ChatGPT and no tool is run.${state.summary ? `\n\n${state.summary}` : ""}`,
+    label: { confirm: "Recheck reply", cancel: "Cancel" },
+  })
+  if (!ok) {
+    ui.toast.show({ message: "Recheck cancelled — nothing changed.", variant: "info" })
+    return
+  }
+  try {
+    const result = await postAction(request, "/v1/sessions/recheck", session, 120_000)
+    await ui.dialog.alert({
+      title: "Bridge recovery — recheck rejected reply",
+      message: recheckReport(session, result),
+    })
+  } catch (error) {
+    await ui.dialog.alert({
+      title: "Bridge recovery — recheck rejected reply",
+      message: `The ChatGPT bridge is not answering, so nothing was checked.\n\nDetails: ${error instanceof Error ? error.message : String(error)}`,
+    })
+  }
+}
+
+async function runCorrectChatgpt(deps: RecoveryDeps, request: AdapterRequest): Promise<void> {
+  const { ui, data } = deps
+  const session = await resolveTargetSession(ui)
+  if (!session) {
+    ui.toast.show({ message: "Correction cancelled — no chat named.", variant: "info" })
+    return
+  }
+  if (sessionBusy(data, session)) {
+    await ui.dialog.alert({
+      title: "Bridge recovery — ask ChatGPT to fix the reply",
+      message: `Chat ${session} has a live turn. Wait for idle, then run this again. Nothing was sent and nothing changed.`,
+    })
+    return
+  }
+  const state = await fetchState(request, session)
+  if (!state.ok || !state.canCorrect) {
+    const report = await recoverReport(
+      deps.adapters.opts,
+      { action: "inspect", session },
+      session,
+      request,
+    )
+    await ui.dialog.alert({ title: "Bridge recovery — ask ChatGPT to fix the reply", message: report })
+    return
+  }
+  const ok = await ui.dialog.confirm({
+    title: "Bridge recovery — ask ChatGPT to fix the reply",
+    message: [
+      `Send ONE new message to the saved ChatGPT conversation for ${session}, asking it to repeat the rejected reply in the exact format?`,
+      "",
+      "Your original task is not resent. No tool is run. A second correction will not be allowed for this reply, and a reply cannot be sent at all if this chat is uncertain.",
+    ].join("\n"),
+    label: { confirm: "Send correction", cancel: "Cancel" },
+  })
+  if (!ok) {
+    ui.toast.show({ message: "Correction cancelled — nothing was sent.", variant: "info" })
+    return
+  }
+  try {
+    const result = await postAction(request, "/v1/sessions/correct-format", session, 180_000)
+    await ui.dialog.alert({
+      title: "Bridge recovery — ask ChatGPT to fix the reply",
+      message: correctionReport(session, result),
+    })
+  } catch (error) {
+    await ui.dialog.alert({
+      title: "Bridge recovery — ask ChatGPT to fix the reply",
+      message: `The ChatGPT bridge is not answering, so no correction was sent and nothing changed.\n\nDetails: ${error instanceof Error ? error.message : String(error)}`,
+    })
+  }
+}
+
 export function buildRecoveryCommands(deps: RecoveryDeps): PaletteCommand[] {
   const { adapters } = deps
   const out: PaletteCommand[] = []
@@ -317,6 +592,22 @@ export function buildRecoveryCommands(deps: RecoveryDeps): PaletteCommand[] {
       group: RECOVERY_GROUP,
       palette: true,
       run: () => runRecoverChatgpt(deps, request),
+    })
+    out.push({
+      id: CMD_RECHECK_CHATGPT,
+      title: "Bridge recovery: recheck rejected ChatGPT reply",
+      description: "Read-only: re-read the exact rejected reply and validate it again. Never resends.",
+      group: RECOVERY_GROUP,
+      palette: true,
+      run: () => runRecheckChatgpt(deps, request),
+    })
+    out.push({
+      id: CMD_CORRECT_CHATGPT,
+      title: "Bridge recovery: ask ChatGPT to fix reply format",
+      description: "Sends ONE correction message, after you confirm. Never resends your task or runs a tool.",
+      group: RECOVERY_GROUP,
+      palette: true,
+      run: () => runCorrectChatgpt(deps, request),
     })
     out.push({
       id: CMD_ABANDON_CHATGPT,
