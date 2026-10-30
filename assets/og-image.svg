@@ -1,31 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
   <defs>
     <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#6366f1"/>
-      <stop offset="100%" stop-color="#22d3ee"/>
+      <stop offset="0%" stop-color="#22C55E"/>
+      <stop offset="100%" stop-color="#22D3EE"/>
     </linearGradient>
     <radialGradient id="glow" cx="0.85" cy="0.3" r="0.6">
-      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.25"/>
-      <stop offset="100%" stop-color="#0b1220" stop-opacity="0"/>
+      <stop offset="0%" stop-color="#22C55E" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#0F172A" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <rect width="1200" height="630" fill="#0b1220"/>
+  <rect width="1200" height="630" fill="#0F172A"/>
   <rect width="1200" height="630" fill="url(#glow)"/>
   <!-- bridge graphic right -->
   <g transform="translate(820,160)">
     <circle cx="0" cy="150" r="38" fill="url(#g)"/>
     <circle cx="260" cy="150" r="38" fill="url(#g)"/>
     <path d="M 0 150 Q 130 20 260 150" fill="none" stroke="url(#g)" stroke-width="22" stroke-linecap="round"/>
-    <line x1="0" y1="150" x2="260" y2="150" stroke="#1f2a44" stroke-width="5"/>
-    <line x1="65" y1="110" x2="65" y2="150" stroke="#6366f1" stroke-width="5" opacity="0.7"/>
-    <line x1="130" y1="70" x2="130" y2="150" stroke="#6366f1" stroke-width="5" opacity="0.7"/>
-    <line x1="195" y1="110" x2="195" y2="150" stroke="#6366f1" stroke-width="5" opacity="0.7"/>
+    <line x1="0" y1="150" x2="260" y2="150" stroke="#1B2336" stroke-width="5"/>
+    <line x1="65" y1="110" x2="65" y2="150" stroke="#22C55E" stroke-width="5" opacity="0.7"/>
+    <line x1="130" y1="70" x2="130" y2="150" stroke="#22C55E" stroke-width="5" opacity="0.7"/>
+    <line x1="195" y1="110" x2="195" y2="150" stroke="#22C55E" stroke-width="5" opacity="0.7"/>
   </g>
   <!-- text -->
-  <text x="80" y="200" font-family="-apple-system, Inter, sans-serif" font-size="62" font-weight="800" fill="#ffffff" letter-spacing="-1">Use ChatGPT, Gemini</text>
-  <text x="80" y="275" font-family="-apple-system, Inter, sans-serif" font-size="62" font-weight="800" fill="#ffffff" letter-spacing="-1">&amp; DeepSeek Web</text>
-  <text x="80" y="350" font-family="-apple-system, Inter, sans-serif" font-size="62" font-weight="800" fill="url(#g)" letter-spacing="-1">inside OpenCode.</text>
-  <text x="80" y="420" font-family="-apple-system, Inter, sans-serif" font-size="26" fill="#8fa0bf">No API key. One-line install. Checksum-verified. Fail-closed recovery.</text>
-  <text x="80" y="560" font-family="ui-monospace, monospace" font-size="22" fill="#22d3ee">$ npx @bojackduy/opencode-web-bridges install</text>
-  <text x="80" y="595" font-family="-apple-system, Inter, sans-serif" font-size="18" fill="#8fa0bf">github.com/bojackduy/opencode-web-bridges</text>
+  <text x="80" y="170" font-family="'JetBrains Mono', monospace" font-size="20" fill="#22C55E" letter-spacing="2">$ opencode-web-bridges</text>
+  <text x="80" y="235" font-family="'JetBrains Mono', monospace" font-size="56" font-weight="700" fill="#FFFFFF" letter-spacing="-1">Use ChatGPT, Gemini</text>
+  <text x="80" y="300" font-family="'JetBrains Mono', monospace" font-size="56" font-weight="700" fill="#FFFFFF" letter-spacing="-1">&amp; DeepSeek Web</text>
+  <text x="80" y="365" font-family="'JetBrains Mono', monospace" font-size="56" font-weight="700" fill="url(#g)" letter-spacing="-1">inside OpenCode.</text>
+  <text x="80" y="430" font-family="'IBM Plex Sans', sans-serif" font-size="24" fill="#94A3B8">No API key. One-line install. Checksum-verified. Fail-closed recovery.</text>
+  <text x="80" y="560" font-family="'JetBrains Mono', monospace" font-size="20" fill="#22C55E">$ npx @bojackduy/opencode-web-bridges install</text>
+  <text x="80" y="595" font-family="'IBM Plex Sans', sans-serif" font-size="16" fill="#94A3B8">github.com/bojackduy/opencode-web-bridges</text>
 </svg>
