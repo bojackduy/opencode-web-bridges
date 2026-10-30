@@ -15,8 +15,15 @@
     "opencode-plugin",
     "chatgpt",
     "chatgpt-web",
+    "gemini",
     "gemini-web",
-    "browser-bridge"
+    "deepseek",
+    "deepseek-web",
+    "browser-bridge",
+    "llm",
+    "openai-compatible",
+    "no-api-key",
+    "cdp"
   ],
   "files": [
     "bin",

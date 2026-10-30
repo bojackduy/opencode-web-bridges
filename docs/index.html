@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>opencode-web-bridges — Use ChatGPT, Gemini &amp; DeepSeek Web inside OpenCode</title>
+  <meta name="description" content="OpenCode plugin that registers ChatGPT Web, Gemini Web and DeepSeek Web as models — using your own logged-in session, no API key. One-line install, checksum-verified, fail-closed recovery." />
+  <meta name="keywords" content="opencode, chatgpt, gemini, deepseek, browser bridge, openai compatible, no api key" />
+  <link rel="canonical" href="https://bojackduy.github.io/opencode-web-bridges/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="opencode-web-bridges — Use ChatGPT, Gemini &amp; DeepSeek Web inside OpenCode" />
+  <meta property="og:description" content="OpenCode plugin that registers ChatGPT Web, Gemini Web and DeepSeek Web as models — using your own logged-in session, no API key." />
+  <meta property="og:image" content="https://bojackduy.github.io/opencode-web-bridges/og-image.png" />
+  <meta property="og:url" content="https://bojackduy.github.io/opencode-web-bridges/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="opencode-web-bridges — Use ChatGPT, Gemini &amp; DeepSeek Web inside OpenCode" />
+  <meta name="twitter:description" content="OpenCode plugin that registers ChatGPT Web, Gemini Web and DeepSeek Web as models — using your own logged-in session, no API key." />
+  <meta name="twitter:image" content="https://bojackduy.github.io/opencode-web-bridges/og-image.png" />
+  <link rel="icon" type="image/png" href="favicon.png" />
+  <style>
+    :root {
+      --bg: #0b1220;
+      --bg-soft: #111a2e;
+      --card: #131d33;
+      --border: #1f2a44;
+      --text: #e6ecf5;
+      --muted: #8fa0bf;
+      --accent: #6366f1;
+      --accent-2: #22d3ee;
+      --good: #34d399;
+      --code-bg: #0a1020;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent-2); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+    nav {
+      position: sticky; top: 0; z-index: 10;
+      backdrop-filter: blur(12px);
+      background: rgba(11,18,32,0.75);
+      border-bottom: 1px solid var(--border);
+    }
+    nav .inner { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+    nav .brand { font-weight: 700; letter-spacing: -0.02em; color: var(--text); }
+    nav .brand span { color: var(--accent); }
+    nav .links { display: flex; gap: 20px; font-size: 14px; }
+    nav .links a { color: var(--muted); }
+    nav .links a:hover { color: var(--text); text-decoration: none; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 18px; border-radius: 8px; font-weight: 600; font-size: 14px;
+      border: 1px solid transparent; cursor: pointer; transition: transform .12s ease, background .12s ease;
+    }
+    .btn:hover { transform: translateY(-1px); text-decoration: none; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #4f46e5; }
+    .btn-ghost { background: transparent; color: var(--text); border-color: var(--border); }
+    .btn-ghost:hover { background: var(--bg-soft); }
+    .hero { padding: 88px 0 64px; text-align: center; }
+    .hero .eyebrow {
+      display: inline-block; font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+      color: var(--accent-2); border: 1px solid var(--border); padding: 4px 10px; border-radius: 999px;
+      background: var(--bg-soft); margin-bottom: 20px;
+    }
+    .hero h1 { font-size: clamp(30px, 5vw, 52px); line-height: 1.1; margin: 0 0 18px; letter-spacing: -0.02em; }
+    .hero h1 .grad { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .hero p { font-size: 18px; color: var(--muted); max-width: 720px; margin: 0 auto 28px; }
+    .hero .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .install {
+      margin: 24px auto 0; max-width: 640px;
+      background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 18px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px;
+      color: var(--accent-2); text-align: left; overflow-x: auto;
+    }
+    section { padding: 72px 0; }
+    section h2 { font-size: 28px; margin: 0 0 12px; letter-spacing: -0.01em; }
+    section .lead { color: var(--muted); font-size: 17px; max-width: 720px; margin: 0 0 40px; }
+    .grid { display: grid; gap: 20px; }
+    .grid-3 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px;
+    }
+    .card h3 { margin: 0 0 8px; font-size: 17px; }
+    .card p { margin: 0; color: var(--muted); font-size: 14px; }
+    .card .tag { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent-2); margin-bottom: 8px; }
+    .engines { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    .engine { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+    .engine h3 { margin: 0 0 6px; }
+    .engine .pill { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--bg-soft); color: var(--muted); margin-right: 6px; }
+    .engine .pill.good { color: var(--good); }
+    .steps { counter-reset: step; }
+    .step { display: flex; gap: 16px; margin-bottom: 18px; }
+    .step .n { flex: 0 0 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+    .step .body h4 { margin: 0 0 4px; font-size: 15px; }
+    .step .body p { margin: 0; color: var(--muted); font-size: 14px; }
+    .faq details { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; }
+    .faq summary { cursor: pointer; font-weight: 600; }
+    .faq details p { color: var(--muted); margin: 10px 0 0; font-size: 14px; }
+    footer { border-top: 1px solid var(--border); padding: 40px 0; color: var(--muted); font-size: 13px; }
+    footer .inner { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .kbd { background: var(--code-bg); border: 1px solid var(--border); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    @media (max-width: 640px) { .hero { padding: 56px 0 40px; } nav .links { display: none; } }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="container inner">
+      <a class="brand" href="#">opencode<span>-web-bridges</span></a>
+      <div class="links">
+        <a href="#features">Features</a>
+        <a href="#engines">Engines</a>
+        <a href="#install">Install</a>
+        <a href="#faq">FAQ</a>
+        <a href="https://github.com/bojackduy/opencode-web-bridges">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="container">
+      <span class="eyebrow">OpenCode plugin · no API key</span>
+      <h1>Use <span class="grad">ChatGPT, Gemini &amp; DeepSeek Web</span><br/>inside OpenCode.</h1>
+      <p>
+        Register your already-logged-in web sessions as OpenCode models. One-line install,
+        checksum-verified binaries, fail-closed recovery that never re-submits a prompt.
+      </p>
+      <div class="cta">
+        <a class="btn btn-primary" href="#install">Get started</a>
+        <a class="btn btn-ghost" href="https://github.com/bojackduy/opencode-web-bridges">View on GitHub</a>
+      </div>
+      <div class="install">$ npx @bojackduy/opencode-web-bridges install</div>
+    </div>
+  </header>
+
+  <section id="problem">
+    <div class="container">
+      <h2>The problem</h2>
+      <p class="lead">
+        OpenCode models need provider API keys and paid per-token billing. You already
+        pay for ChatGPT Plus/Pro or a Gemini subscription — using it inside OpenCode
+        shouldn't mean paying twice.
+      </p>
+      <div class="grid grid-3">
+        <div class="card">
+          <div class="tag">Cost</div>
+          <h3>Double paying</h3>
+          <p>Subscription plus API billing for the same model family.</p>
+        </div>
+        <div class="card">
+          <div class="tag">Friction</div>
+          <h3>Manual wiring</h3>
+          <p>Provider and MCP entries hand-edited, easy to break.</p>
+        </div>
+        <div class="card">
+          <div class="tag">Reliability</div>
+          <h3>Lost turns</h3>
+          <p>Interrupted browser turns leave uncertain state; retries re-submit.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="container">
+      <h2>What it does</h2>
+      <p class="lead">Bridges your logged-in web sessions into OpenCode as ordinary models, with recovery that fails closed.</p>
+      <div class="grid grid-3">
+        <div class="card"><div class="tag">No API key</div><h3>Your own session</h3><p>Uses the Chrome profile you log into once. Subject to your account's own limits.</p></div>
+        <div class="card"><div class="tag">Install</div><h3>One command</h3><p>Detects OpenCode v1/v2, downloads checksum-verified binaries, writes config without clobbering.</p></div>
+        <div class="card"><div class="tag">Recovery</div><h3>Fail-closed</h3><p>Exact/key/window bubble identity, dirty adopt-first, hash-lineage auto-resync. Never re-submits on retry.</p></div>
+        <div class="card"><div class="tag">Hosts</div><h3>v1 + v2</h3><p>One package covers both OpenCode generations via server hook or setup domains.</p></div>
+        <div class="card"><div class="tag">Privacy</div><h3>Content-free logs</h3><p>Sizes, counts, reason codes only. No prompt text or args in logs.</p></div>
+        <div class="card"><div class="tag">Engines</div><h3>Three providers</h3><p>ChatGPT, Gemini, DeepSeek — pick the one whose subscription you hold.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="engines">
+    <div class="container">
+      <h2>Engines</h2>
+      <p class="lead">All advertise tool calling. Choose by the subscription you already hold.</p>
+      <div class="engines">
+        <div class="engine">
+          <h3>ChatGPT Web</h3>
+          <p><span class="pill good">primary</span><span class="pill">CDP</span><span class="pill">projects</span></p>
+          <p style="margin-top:10px;color:var(--muted);font-size:14px;">Full feature set: projects per session, thread reuse, recovery UX, media inputs. Needs Chrome + dedicated profile.</p>
+        </div>
+        <div class="engine">
+          <h3>Gemini Web</h3>
+          <p><span class="pill">CDP</span><span class="pill">text-only</span></p>
+          <p style="margin-top:10px;color:var(--muted);font-size:14px;">Text-only browser engine. Local build required (no published release). Own tab, profile and CDP port.</p>
+        </div>
+        <div class="engine">
+          <h3>DeepSeek Web</h3>
+          <p><span class="pill">HTTP+SSE</span><span class="pill">no browser</span></p>
+          <p style="margin-top:10px;color:var(--muted);font-size:14px;">Speaks the web API directly. No Chrome, no CDP. Needs a userToken from a signed-in session.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="container">
+      <h2>Install</h2>
+      <p class="lead">Prerequisites: Node.js ≥20, OpenCode v1 or v2, Bun ≥1.1, Chrome/Chromium.</p>
+      <div class="steps">
+        <div class="step"><div class="n">1</div><div class="body"><h4>Run the installer</h4><p><code class="kbd">npx @bojackduy/opencode-web-bridges install</code></p></div></div>
+        <div class="step"><div class="n">2</div><div class="body"><h4>Restart OpenCode</h4><p>Select <code>chatgpt-web/chatgpt-web</code> in /models.</p></div></div>
+        <div class="step"><div class="n">3</div><div class="body"><h4>Log in once</h4><p>Run <code>/chatgpt-login</code>, sign in to ChatGPT in the profile window, then <code>/chatgpt-status</code>.</p></div></div>
+      </div>
+      <div class="install">$ npx @bojackduy/opencode-web-bridges install --host v2 --dry-run</div>
+      <p style="color:var(--muted);font-size:13px;margin-top:12px;">Dry-run previews exact config and required release assets without writing.</p>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="container">
+      <h2>FAQ</h2>
+      <div class="faq">
+        <details><summary>Does this bypass ChatGPT/Gemini usage limits?</summary><p>No. It uses your own logged-in session, subject to your account's access and usage limits.</p></details>
+        <details><summary>Is my data sent to a third party?</summary><p>No. The bridge runs locally on 127.0.0.1 and drives your own Chrome profile. Logs are content-free.</p></details>
+        <details><summary>Why AGPL-3.0?</summary><p>Copyleft ensures improvements stay open, including for network use. See LICENSE.</p></details>
+        <details><summary>Can I use it with OpenCode v1 and v2?</summary><p>Yes — one package, both hosts, via server hook (v1) or setup domains (v2).</p></details>
+        <details><summary>What if a turn is interrupted?</summary><p>Recovery reads the remote transcript back; nothing is re-submitted. Fail-closed on uncertainty.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container inner">
+      <div>© 2026 Duy Trinh · AGPL-3.0-or-later</div>
+      <div>
+        <a href="https://github.com/bojackduy/opencode-web-bridges">GitHub</a> ·
+        <a href="https://www.npmjs.com/package/@bojackduy/opencode-web-bridges">npm</a> ·
+        <a href="https://github.com/bojackduy/opencode-web-bridges/blob/main/LICENSE">License</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
