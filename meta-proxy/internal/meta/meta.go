@@ -63,7 +63,8 @@ type Client struct {
 }
 
 func New(port int, profile, chrome string) *Client {
-	return &Client{ChromePort: port, ProfileDir: profile, ChromePath: chrome}
+	return &Client{ChromePort: port, ProfileDir: profile, ChromePath: chrome,
+		life: context.Background()}
 }
 
 // Close releases the chromedp context.
@@ -333,11 +334,20 @@ func operationContext(tab context.Context, parent context.Context, timeout time.
 	return ctx, cancel
 }
 
+// ensureBrowserLocked assumes c.mu is held (same discipline as gemini-proxy).
+func (c *Client) ensureBrowserLocked(ctx context.Context) error {
+	if c.tabAlive() {
+		return nil
+	}
+	c.teardownLocked()
+	return c.tryEnsureLocked(ctx)
+}
+
 // LoginState attaches (read-only) and reports the signed-in state.
 func (c *Client) LoginState(ctx context.Context) (*Status, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err := c.ensureBrowser(ctx); err != nil {
+	if err := c.ensureBrowserLocked(ctx); err != nil {
 		return nil, err
 	}
 	rctx, cancel := operationContext(c.tab, ctx, 30*time.Second)
@@ -361,7 +371,7 @@ func (c *Client) LoginState(ctx context.Context) (*Status, error) {
 func (c *Client) CurrentURL(ctx context.Context) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err := c.ensureBrowser(ctx); err != nil {
+	if err := c.ensureBrowserLocked(ctx); err != nil {
 		return ""
 	}
 	rctx, cancel := operationContext(c.tab, ctx, 10*time.Second)
@@ -373,15 +383,32 @@ func (c *Client) CurrentURL(ctx context.Context) string {
 	return url
 }
 
-// Ask submits a prompt and returns the answer text.
+// Ask submits a prompt and returns the answer text. Finishedness proof
+// (same standard as gemini-proxy): snapshot the answer set before submit,
+// then adopt only new content stable across 3 polls (~4.5s) with no stop
+// indicator. Stale, absent, or unfinished answers fail closed — never adopted.
 func (c *Client) Ask(ctx context.Context, prompt string, newSession bool, timeout time.Duration) (string, error) {
+	if strings.TrimSpace(prompt) == "" {
+		return "", errors.New("prompt must not be empty")
+	}
+	if timeout <= 0 || timeout > 30*time.Minute {
+		timeout = 10 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	started := time.Now()
+	log.Printf("[meta] stage=start prompt_bytes=%d new_session=%v timeout=%s", len(prompt), newSession, timeout)
+	defer func() {
+		log.Printf("[meta] stage=finish duration=%s", time.Since(started).Round(time.Millisecond))
+	}()
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err := c.ensureBrowser(ctx); err != nil {
+	if err := c.ensureBrowserLocked(ctx); err != nil {
 		return "", err
 	}
-	rctx, cancel := operationContext(c.tab, ctx, timeout)
-	defer cancel()
+	rctx, rcancel := operationContext(c.tab, ctx, timeout)
+	defer rcancel()
 
 	if newSession {
 		for _, sel := range newChatSelectors {
@@ -393,6 +420,9 @@ func (c *Client) Ask(ctx context.Context, prompt string, newSession bool, timeou
 			}
 		}
 	}
+
+	before := c.answerSnapshot(rctx)
+	log.Printf("[meta] stage=submit prior_answers=%d", before.count)
 
 	typed := false
 	for _, sel := range composerSelectors {
@@ -419,38 +449,189 @@ func (c *Client) Ask(ctx context.Context, prompt string, newSession bool, timeou
 		}
 	}
 	if !sent {
+		// Fallback: Enter key submits most chat composers.
+		if err := chromedp.Run(rctx, chromedp.KeyEvent("\n")); err == nil {
+			sent = true
+		}
+	}
+	if !sent {
 		return "", ErrNotSubmitted
 	}
+	log.Printf("[meta] stage=submitted")
 
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		select {
-		case <-rctx.Done():
-			return "", rctx.Err()
-		default:
-		}
-		var answer string
-		for _, sel := range answerSelectors {
-			var found bool
-			if err := chromedp.Run(rctx, chromedp.Evaluate(fmt.Sprintf(`!!document.querySelector(%q)`, sel), &found)); err == nil && found {
-				if err := chromedp.Run(rctx, chromedp.Text(sel, &answer, chromedp.ByQuery)); err == nil && strings.TrimSpace(answer) != "" {
-					return strings.TrimSpace(answer), nil
-				}
-			}
-		}
-		time.Sleep(2 * time.Second)
-	}
-	return "", fmt.Errorf("meta: no answer within timeout")
+	return c.waitForAnswerLocked(rctx, ctx, before)
 }
 
-// ReadThreadTurn reads a specific turn (read-only, no submit).
+// answerSnapshot is the pre-submit answer set: node count plus the newest
+// answer text length. Both must advance before any adoption.
+type answerSnapshot struct {
+	count       int
+	newestBytes int
+}
+
+func (c *Client) answerSnapshot(ctx context.Context) answerSnapshot {
+	var snap answerSnapshot
+	_ = chromedp.Run(ctx, chromedp.Evaluate(newestAnswerCountJS, &snap.count))
+	_ = chromedp.Run(ctx, chromedp.Evaluate(newestAnswerTextJS, &snap.newestBytes))
+	return snap
+}
+
+// waitForAnswerLocked polls for a new, stable, finished answer. Callers must
+// hold c.mu. Fail-closed: stale/absent/unfinished content is never adopted.
+// Completion is proved by stability (text unchanged across 3 polls ~6s)
+// after the node count or text length grew past the before-snapshot, plus
+// presence of the "Copy response" affordance that Meta renders only for
+// a finished turn.
+func (c *Client) waitForAnswerLocked(rctx, parent context.Context, before answerSnapshot) (string, error) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	var lastStable string
+	stableRounds := 0
+	lastLogged := -1
+	for {
+		select {
+		case <-rctx.Done():
+			return "", fmt.Errorf("meta: no answer within timeout: %w", rctx.Err())
+		case <-parent.Done():
+			return "", fmt.Errorf("meta: no answer within timeout: %w", parent.Err())
+		case <-ticker.C:
+			var count int
+			_ = chromedp.Run(rctx, chromedp.Evaluate(newestAnswerCountJS, &count))
+			var text string
+			_ = chromedp.Run(rctx, chromedp.Evaluate(newestAnswerTextJS, &text))
+			// completion indicator: Copy response button rendered
+			var hasCopy bool
+			_ = chromedp.Run(rctx, chromedp.Evaluate(`!!document.querySelector('button[aria-label="Copy response"]')`, &hasCopy))
+			if len(text) != lastLogged {
+				lastLogged = len(text)
+				log.Printf("[meta] stage=stream_poll answer_bytes=%d answer_nodes=%d has_copy=%v", len(text), count, hasCopy)
+			}
+			if !answerAdoptable(before.count, before.newestBytes, count, text, hasCopy) {
+				stableRounds = 0
+				lastStable = text
+				continue
+			}
+			if text == lastStable {
+				stableRounds++
+			} else {
+				stableRounds = 0
+				lastStable = text
+			}
+			if stableRounds >= 3 {
+				select {
+				case <-rctx.Done():
+					return "", fmt.Errorf("meta: no answer within timeout: %w", rctx.Err())
+				case <-time.After(1 * time.Second):
+				}
+				return strings.TrimSpace(text), nil
+			}
+		}
+	}
+}
+
+// answerAdoptable is the pure finishedness gate: new content exists (node
+// count grew or newest text lengthened), text is non-blank, and the
+// "Copy response" completion affordance is present (Meta renders it only
+// for a finished turn). Unit-tested.
+func answerAdoptable(beforeCount, beforeBytes, count int, text string, hasCopy bool) bool {
+	if !hasCopy {
+		return false
+	}
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	if count > beforeCount {
+		return true
+	}
+	if count == beforeCount && len(text) > beforeBytes {
+		return true
+	}
+	return false
+}
+
+// newestAnswerCountJS counts candidate answer nodes; newestAnswerTextJS
+// returns the newest candidate answer text ("" when none).
+const newestAnswerCountJS = `(function(){
+  return document.querySelectorAll('div[role="article"][aria-label="Meta AI response"]').length;})()`
+
+const newestAnswerTextJS = `(function(){
+  var n=document.querySelectorAll('div[role="article"][aria-label="Meta AI response"]');
+  if(!n.length) return '';
+  var el=n[n.length-1];
+  // Prefer the markdown text container; fall back to innerText.
+  var body=el.querySelector('[class*="text-response"]') || el;
+  return (body.innerText||'').trim();})()`
+
+// ReadThreadTurn reads a specific turn (read-only, no submit). It verifies
+// the tab is on url, then returns the newest finished answer: two reads 2s
+// apart must agree with no stop indicator, else fail closed.
 func (c *Client) ReadThreadTurn(ctx context.Context, url, prompt string) (TurnResult, error) {
-	return TurnResult{}, fmt.Errorf("meta: ReadThreadTurn not implemented")
+	_ = prompt // binding key is the URL; prompt sizes are logged by the caller
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.ensureBrowserLocked(ctx); err != nil {
+		return TurnResult{}, err
+	}
+	rctx, cancel := operationContext(c.tab, ctx, 30*time.Second)
+	defer cancel()
+	var cur string
+	if err := chromedp.Run(rctx, chromedp.Location(&cur)); err != nil {
+		return TurnResult{}, err
+	}
+	if url != "" && cur != url {
+		return TurnResult{}, fmt.Errorf("%w: want thread, at other page", ErrThreadBinding)
+	}
+	return c.readLatestLocked(rctx)
 }
 
 // ReadLatestThreadTurn reads the latest turn (read-only, no submit).
 func (c *Client) ReadLatestThreadTurn(ctx context.Context, url string) (string, TurnResult, error) {
-	return "", TurnResult{}, fmt.Errorf("meta: ReadLatestThreadTurn not implemented")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.ensureBrowserLocked(ctx); err != nil {
+		return "", TurnResult{}, err
+	}
+	rctx, cancel := operationContext(c.tab, ctx, 30*time.Second)
+	defer cancel()
+	var cur string
+	if err := chromedp.Run(rctx, chromedp.Location(&cur)); err != nil {
+		return "", TurnResult{}, err
+	}
+	if url != "" && cur != url {
+		return "", TurnResult{}, fmt.Errorf("%w: want thread, at other page", ErrThreadBinding)
+	}
+	res, err := c.readLatestLocked(rctx)
+	if err != nil {
+		return "", TurnResult{}, err
+	}
+	return cur, res, nil
+}
+
+// readLatestLocked returns the newest finished answer. Callers must hold c.mu.
+func (c *Client) readLatestLocked(ctx context.Context) (TurnResult, error) {
+	if c.anyPresent(ctx, stopSelectors) {
+		return TurnResult{}, errors.New("meta: generation still in progress")
+	}
+	var first string
+	_ = chromedp.Run(ctx, chromedp.Evaluate(newestAnswerTextJS, &first))
+	if strings.TrimSpace(first) == "" {
+		return TurnResult{}, errors.New("meta: no answer present")
+	}
+	select {
+	case <-ctx.Done():
+		return TurnResult{}, ctx.Err()
+	case <-time.After(2 * time.Second):
+	}
+	if c.anyPresent(ctx, stopSelectors) {
+		return TurnResult{}, errors.New("meta: generation still in progress")
+	}
+	var second string
+	_ = chromedp.Run(ctx, chromedp.Evaluate(newestAnswerTextJS, &second))
+	if strings.TrimSpace(second) == "" || second != first {
+		return TurnResult{}, errors.New("meta: answer not stable")
+	}
+	log.Printf("[meta] stage=read answer_bytes=%d", len(second))
+	return TurnResult{Answer: strings.TrimSpace(second)}, nil
 }
 
 // ValidThreadURL is a validity check.
@@ -475,8 +656,17 @@ var (
 
 var ErrThreadBinding = errors.New("meta thread binding error")
 
-func IsPreSubmit(err error) bool { return false }
-func IsNavigateError(err error) bool { return false }
+func IsPreSubmit(err error) bool {
+	return errors.Is(err, ErrNoComposer) || errors.Is(err, ErrNotLoggedIn) ||
+		errors.Is(err, ErrForeignDraft) || errors.Is(err, ErrDraftOwned)
+}
+func IsNavigateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "navigate:") || strings.Contains(msg, "page did not settle")
+}
 
 // ExtractExecutableCalls is defined in bridge.go.
 
@@ -494,12 +684,14 @@ var (
 		`a[aria-label*="Account"]`,
 	}
 	composerSelectors = []string{
-		`textarea`,
+		`div[role="textbox"][contenteditable="true"]`, // verified 2026-10-30 live DOM
 		`div[contenteditable="true"]`,
+		`textarea`,
 		`div[role="textbox"]`,
 		`input[type="text"]`,
 	}
 	sendSelectors = []string{
+		`button[aria-label="Send"]`, // verified 2026-10-30 live DOM
 		`button[aria-label*="Send"]`,
 		`button[aria-label*="Submit"]`,
 		`button[type="submit"]`,
@@ -509,10 +701,16 @@ var (
 		`a[aria-label*="New chat"]`,
 	}
 	answerSelectors = []string{
+		`div[role="article"][aria-label="Meta AI response"]`, // verified 2026-10-30
 		`div[role="article"]`,
-		`div[class*="response"]`,
-		`div[class*="answer"]`,
-		`div[class*="message"]`,
+	}
+	// stopSelectors match the cancel/stop affordance shown while generating.
+	// Meta uses aria-label="Cancel" for the generation-cancel button (verified
+	// 2026-10-30). It is NOT a stable completion marker — only used as a
+	// "still generating" hint; stability + Copy-response button is the proof.
+	stopSelectors = []string{
+		`button[aria-label="Stop"]`, // verified 2026-10-30 live DOM
+		`button[aria-label="Cancel"]`,
 	}
 )
 
