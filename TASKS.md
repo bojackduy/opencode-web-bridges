@@ -5,12 +5,11 @@ when started. Updated 2026-10-30.
 
 ## Active
 
-- [ ] **meta.ai bridge** (goal `meta-proxy-bridge`, running) — same
-  Web-bridge pattern for `https://www.meta.ai/`. Profile `~/.meta-proxy`
-  (logged in), Chrome via launchd `com.meta-proxy.chrome` on CDP 9224,
-  adapter port 8791. Phase 1: transport probe (anonymous `/` serves a JS
-  `__rd_verify` challenge; no projects per user, gemini-like thread model).
-  Phase 2: build meta-proxy/ module, owner integrates.
+- [x] **meta.ai bridge** (LIVE 2026-10-31) — adapter on 8791 via
+  launchd `com.meta-proxy.openai`, Chrome via `com.meta-proxy.chrome` on
+  CDP 9224, first live turn completed 9.1s ("alive"). Registered as
+  `meta-web` in opencode.jsonc providers. Watch: fresh bridge, no recovery
+  mileage yet.
 - [ ] **DeepSeek tool-call crash fix** (goal `deepseek-toolcrash-fix`,
   running) — reproduce on current build, fix at verified root, owner
   integrates (commit/push/deploy).
