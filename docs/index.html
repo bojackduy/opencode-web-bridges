@@ -135,6 +135,7 @@
       <a class="brand" href="#">opencode<span class="dot">.</span>web-bridges</a>
       <div class="links">
         <a href="#engines">Engines</a>
+        <a href="#demo">Demo</a>
         <a href="#install">Install</a>
         <a href="#faq">FAQ</a>
         <a href="https://github.com/bojackduy/opencode-web-bridges">GitHub</a>
@@ -253,6 +254,17 @@
         <div class="install">$ npx @bojackduy/opencode-web-bridges install --host v2 --dry-run</div>
         <p style="color: var(--muted); font-size: 13px; margin-top: 8px;">Dry-run previews exact config and required release assets without writing.</p>
       </div>
+    </div>
+  </section>
+
+  <section id="demo">
+    <div class="container">
+      <h2>Demo</h2>
+      <p class="lead">A real run: OpenCode sends a prompt, the bridge drives your logged-in Gemini tab, and the reply comes back. No API key.</p>
+      <figure style="margin: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg);">
+        <img src="demo-gemini.png" alt="Gemini web session driven by opencode-web-bridges, showing a conversation processed through the bridge" style="display: block; width: 100%; height: auto;" loading="lazy" />
+        <figcaption style="padding: 10px 14px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--border);">Gemini web session driven by the bridge (CDP, dedicated profile). Captured via Chrome DevTools Protocol.</figcaption>
+      </figure>
     </div>
   </section>
 
