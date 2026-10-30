@@ -14,7 +14,7 @@ guides first-run login.
 
 ![Demo: terminal runs a request through the bridge while the browser shows your logged-in Gemini tab processing it](docs/demo-gemini.gif)
 
-OpenCode (left) runs a request through the gemini-web model; your logged-in Gemini tab (right) processes it and the reply comes back. Captured with asciinema + Chrome DevTools Protocol.
+OpenCode TUI with the gemini-web model selected. A prompt is sent, the bridge drives your logged-in Gemini tab, and the reply comes back. Captured with asciinema (terminal) + Chrome DevTools Protocol (browser).
 
 ## Optional Gemini Web — local build, explicit opt-in
 
