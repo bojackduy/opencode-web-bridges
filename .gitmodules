@@ -1,12 +1,12 @@
 [submodule "chatgpt-proxy"]
 	path = chatgpt-proxy
-	url = git@Duyyy123:bojackduy/chatgpt-proxy.git
+	url = https://github.com/bojackduy/chatgpt-proxy.git
 	branch = main
 [submodule "gemini-proxy"]
 	path = gemini-proxy
-	url = git@Duyyy123:bojackduy/gemini-proxy.git
+	url = https://github.com/bojackduy/gemini-proxy.git
 	branch = main
 [submodule "deepseek-proxy"]
 	path = deepseek-proxy
-	url = git@Duyyy123:bojackduy/deepseek-proxy.git
+	url = https://github.com/bojackduy/deepseek-proxy.git
 	branch = main
