@@ -262,13 +262,36 @@
       <h2>Demo</h2>
       <p class="lead">A real run: OpenCode sends a prompt, the bridge drives your logged-in Gemini tab, and the reply comes back. No API key.</p>
       <figure style="margin: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg);">
-        <video autoplay muted loop playsinline style="display: block; width: 100%; height: auto;" poster="demo-gemini.png">
+        <video id="demo-video" muted playsinline preload="metadata" poster="demo-gemini.png" style="display: block; width: 100%; height: auto; cursor: pointer;">
           <source src="demo-gemini.mp4" type="video/mp4" />
           <source src="demo-gemini.gif" type="image/gif" />
           <img src="demo-gemini.png" alt="Gemini web session driven by opencode-web-bridges" style="display: block; width: 100%; height: auto;" />
         </video>
-        <figcaption style="padding: 10px 14px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--border);">Live demo: OpenCode (left) runs a request through the gemini-web model; your logged-in Gemini tab (right) processes it and the reply comes back. Captured via asciinema + Chrome DevTools Protocol.</figcaption>
+        <figcaption style="padding: 10px 14px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--border);">Live demo: OpenCode (left) runs a request through the gemini-web model; your logged-in Gemini tab (right) processes it and the reply comes back. Captured via asciinema + Chrome DevTools Protocol. Click the video to replay.</figcaption>
       </figure>
+      <script>
+        (function () {
+          var v = document.getElementById('demo-video');
+          if (!v) return;
+          var played = false;
+          var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (e) {
+              if (e.isIntersecting && !played) {
+                played = true;
+                v.play().catch(function () {});
+              }
+            });
+          }, { threshold: 0.5 });
+          io.observe(v);
+          v.addEventListener('click', function () {
+            v.currentTime = 0;
+            v.play().catch(function () {});
+          });
+          v.addEventListener('ended', function () {
+            v.pause();
+          });
+        })();
+      </script>
     </div>
   </section>
 
