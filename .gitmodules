@@ -1,7 +1,3 @@
-[submodule "gemini-proxy"]
-	path = gemini-proxy
-	url = https://github.com/bojackduy/gemini-proxy.git
-	branch = main
 [submodule "deepseek-proxy"]
 	path = deepseek-proxy
 	url = https://github.com/bojackduy/deepseek-proxy.git
