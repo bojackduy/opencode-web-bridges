@@ -561,6 +561,10 @@ func (c *Client) waitForAnswerLocked(rctx, parent context.Context, before answer
 					return "", fmt.Errorf("meta: no answer within timeout: %w", rctx.Err())
 				case <-time.After(1 * time.Second):
 				}
+				if isMetaErrorState(text) {
+					log.Printf("[meta] stage=finish result=error-bubble")
+					return "", errors.New("meta: answer is an error state, not model output")
+				}
 				rendered, rerr := c.renderAnswer(rctx)
 				if rerr != nil {
 					return "", rerr
@@ -569,6 +573,29 @@ func (c *Client) waitForAnswerLocked(rctx, parent context.Context, before answer
 			}
 		}
 	}
+}
+
+// metaErrorStrings are UI error states Meta renders inside the answer
+// article instead of a reply (observed live). They carry the finishedness
+// affordances (Copy button) but are not model output: adopting one would
+// commit an error bubble as the turn's answer. Match is case-insensitive
+// on trimmed text; only the reason code is ever logged.
+var metaErrorStrings = []string{
+	"something went wrong",
+	"please try again",
+}
+
+func isMetaErrorState(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	for _, s := range metaErrorStrings {
+		if strings.Contains(lower, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // answerAdoptable is the pure finishedness gate: new content exists (node
@@ -602,8 +629,13 @@ const newestAnswerTextJS = `(function(){
   var n=document.querySelectorAll('div[role="article"][aria-label="Meta AI response"]');
   if(!n.length) return '';
   var el=n[n.length-1];
-  // Prefer the markdown text container; fall back to innerText.
-  var body=el.querySelector('[class*="text-response"]') || el;
+  // Prefer the markdown text container; fall back to the article. UI
+  // chrome (buttons incl. "Show thinking", toolbars, hidden and thinking
+  // nodes) is stripped: innerText otherwise leaks control text into
+  // delivered answers (observed: titles delivered as
+  // "Show thinking\n\nGreeting") and poisons wrapper validation.
+  var body=(el.querySelector('[class*="text-response"]') || el).cloneNode(true);
+  body.querySelectorAll('button,[role="toolbar"],[aria-hidden="true"],[data-thought],[data-thinking]').forEach(function(e){e.remove();});
   return (body.innerText||'').trim();})()`
 
 const newestAnswerHTMLJS = `(function(){
@@ -680,6 +712,9 @@ func (c *Client) readLatestLocked(ctx context.Context) (TurnResult, error) {
 	_ = chromedp.Run(ctx, chromedp.Evaluate(newestAnswerTextJS, &second))
 	if strings.TrimSpace(second) == "" || second != first {
 		return TurnResult{}, errors.New("meta: answer not stable")
+	}
+	if isMetaErrorState(second) {
+		return TurnResult{}, errors.New("meta: answer is an error state, not model output")
 	}
 	rendered, rerr := c.renderAnswer(ctx)
 	if rerr != nil {

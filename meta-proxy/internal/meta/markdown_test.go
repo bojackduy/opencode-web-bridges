@@ -46,3 +46,22 @@ func TestAnswerToMarkdownFallsBackToPlain(t *testing.T) {
 		t.Fatalf("empty HTML must fall back to plain text, got %q", got)
 	}
 }
+
+func TestIsMetaErrorState(t *testing.T) {
+	for _, s := range []string{
+		"Something went wrong. Please try again.",
+		"something went wrong",
+		"  PLEASE TRY AGAIN  ",
+	} {
+		if !isMetaErrorState(s) {
+			t.Fatalf("must detect error state: %q", s)
+		}
+	}
+	for _, s := range []string{
+		"", "Greeting", "Something went right", "try again later with a real question answered",
+	} {
+		if isMetaErrorState(s) {
+			t.Fatalf("must not flag model output: %q", s)
+		}
+	}
+}
