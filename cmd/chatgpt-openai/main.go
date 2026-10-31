@@ -22,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"chatgpt-proxy/internal/chatgpt"
+	"github.com/bojackduy/bridgecore"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -1278,6 +1279,16 @@ func compileTools(tools []toolDef) (map[string]*jsonschema.Schema, error) {
 }
 
 func parseAnswer(answer string, req completionsRequest) (result, error) {
+	// A source-bound protocol may be enclosed in a literal escape envelope.
+	// Unwrap a whole-reply envelope before validation; the empty display
+	// envelope is dropped afterwards. Never rewrite tags inside arguments.
+	trimmed := strings.TrimSpace(answer)
+	if strings.HasPrefix(trimmed, "<escape>") && strings.HasSuffix(trimmed, "</escape>") {
+		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "<escape>"), "</escape>"))
+		if inner != "" {
+			answer = inner
+		}
+	}
 	out := result{Text: strings.TrimSpace(answer)}
 	allowed, err := compileTools(req.Tools)
 	if err != nil {
@@ -1290,32 +1301,25 @@ func parseAnswer(answer string, req completionsRequest) (result, error) {
 			named, _ = fn["name"].(string)
 		}
 	}
-	for i, m := range toolBlock.FindAllStringSubmatch(answer, -1) {
-		var v struct {
-			Name      string          `json:"name"`
-			Arguments json.RawMessage `json:"arguments"`
-		}
-		if err := json.Unmarshal([]byte(m[1]), &v); err != nil {
-			return result{}, fmt.Errorf("malformed tool JSON: %w", err)
-		}
-		var args map[string]any
-		if err := json.Unmarshal(v.Arguments, &args); err != nil || args == nil {
-			return result{}, errors.New("tool arguments must be a JSON object")
-		}
-		if allowed[v.Name] == nil || choice == "none" || (named != "" && named != v.Name) {
-			return result{}, fmt.Errorf("tool name %q is not allowed by tools/tool_choice", v.Name)
-		}
-		if err := allowed[v.Name].Validate(args); err != nil {
-			return result{}, fmt.Errorf("tool %s arguments: %w", v.Name, err)
-		}
-		sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d", answer, i)))
-		out.Calls = append(out.Calls, toolCall{ID: fmt.Sprintf("call_%x", sum[:12]), Type: "function", Function: callFunction{Name: v.Name, Arguments: string(v.Arguments)}})
-		out.Text = strings.Replace(out.Text, m[0], "", 1)
+	tc := choice
+	if tc == "" {
+		tc = "auto"
 	}
-	if toolMarker.MatchString(out.Text) {
-		return result{}, errors.New("incomplete opencode_bridge_call wrapper")
+	if named != "" {
+		tc = named
 	}
-	out.Text = strings.TrimSpace(out.Text)
+	// Tolerant mode is the long-standing ChatGPT behavior: its model
+	// habitually narrates around calls, so validated calls deliver with
+	// the surrounding commentary preserved as text. Malformed, incomplete,
+	// fenced and disallowed shapes still error with zero calls.
+	calls, prose, err := bridgecore.SplitCallsAndProse(answer, allowed, tc)
+	if err != nil {
+		return result{}, err
+	}
+	for i, c := range calls {
+		out.Calls = append(out.Calls, toolCall{ID: bridgecore.StableCallID(answer, i), Type: "function", Function: callFunction{Name: c.Name, Arguments: c.RawArguments}})
+	}
+	out.Text = prose
 	// A source-bound protocol may be enclosed in a literal escape envelope.
 	// After removing fully validated calls, suppress only the now-empty
 	// envelope. Never rewrite tags or backslashes inside tool arguments.
