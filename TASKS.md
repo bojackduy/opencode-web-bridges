@@ -5,11 +5,11 @@ when started. Updated 2026-10-30.
 
 ## Active
 
-- [x] **meta.ai bridge** (LIVE 2026-10-31) — adapter on 8791 via
-  launchd `com.meta-proxy.openai`, Chrome via `com.meta-proxy.chrome` on
-  CDP 9224, first live turn completed 9.1s ("alive"). Registered as
-  `meta-web` in opencode.jsonc providers. Watch: fresh bridge, no recovery
-  mileage yet.
+- [x] **meta.ai bridge** (HARDENED + REDEPLOYED 2026-10-31) — adapter on
+  8791, Chrome on CDP 9224, `meta-web` registered. Streamed turn verified:
+  role→content→finish_reason:stop→DONE, single submit, 14.6s. Retry-storm
+  root cause (no SSE) fixed along with tool-call wiring, chunk budgets,
+  reseed + compaction-append, adopt-first, honest abandon/recover.
 - [ ] **DeepSeek tool-call crash fix** (goal `deepseek-toolcrash-fix`,
   running) — reproduce on current build, fix at verified root, owner
   integrates (commit/push/deploy).
