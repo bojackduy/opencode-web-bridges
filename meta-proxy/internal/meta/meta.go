@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 )
@@ -425,10 +426,12 @@ func (c *Client) Ask(ctx context.Context, prompt string, newSession bool, timeou
 	log.Printf("[meta] stage=submit prior_answers=%d", before.count)
 
 	// Bulk insert, never keystroke typing: SendKeys types word-by-word and
-	// takes minutes on large pastes (observed). One focus +
-	// execCommand('insertText') writes the whole prompt in a single editor
-	// transaction; the held length is then verified before Send is touched.
-	// A short write fails closed — a partial paste must never be sent.
+	// takes minutes on large pastes (observed). Meta's composer is Lexical,
+	// which rejects document.execCommand('insertText') (observed
+	// exec-false) but honors a single CDP Input.insertText transaction.
+	// Select-all first so residue drafts are replaced, not appended to;
+	// the held length is then verified before Send is touched. A short
+	// write fails closed — a partial paste must never be sent.
 	composer := ""
 	deadline := time.Now().Add(25 * time.Second)
 	for time.Now().Before(deadline) {
@@ -447,21 +450,20 @@ func (c *Client) Ask(ctx context.Context, prompt string, newSession bool, timeou
 	if composer == "" {
 		return "", ErrNoComposer
 	}
-	quoted, err := json.Marshal(prompt)
-	if err != nil {
-		return "", fmt.Errorf("%w: prompt encoding failed: %v", ErrNotSubmitted, err)
+	selAllJS := fmt.Sprintf(`(function(){var el=document.querySelector(%q); if(!el)return 'missing'; el.focus(); var sel=getSelection(); try{sel.selectAllChildren(el);}catch(e){return 'select-error:'+e;} return 'selected:'+((el.innerText||'').length);})()`, composer)
+	var selRes string
+	if err := chromedp.Run(rctx, chromedp.Evaluate(selAllJS, &selRes)); err != nil || !strings.HasPrefix(selRes, "selected:") {
+		return "", fmt.Errorf("%w: composer select failed (%s): %v", ErrNotSubmitted, selRes, err)
 	}
-	var filled string
-	fillJS := fmt.Sprintf(`(function(){var el=document.querySelector(%q); if(!el)return 'missing'; el.focus(); var ok=false; try{ok=document.execCommand('insertText',false,%s);}catch(e){return 'exec-error:'+e} var held=(el.innerText||''); return (ok?'inserted:':'exec-false:')+held.length;})()`, composer, string(quoted))
-	if err := chromedp.Run(rctx, chromedp.Evaluate(fillJS, &filled)); err != nil {
-		return "", fmt.Errorf("%w: composer fill failed: %v", ErrNotSubmitted, err)
-	}
-	log.Printf("[meta] stage=composer_insert result=%s prompt_bytes=%d", filled, len(prompt))
-	if !strings.HasPrefix(filled, "inserted:") {
-		return "", fmt.Errorf("%w: composer fill rejected (%s)", ErrNotSubmitted, filled)
+	if err := chromedp.Run(rctx, input.InsertText(prompt)); err != nil {
+		return "", fmt.Errorf("%w: composer insert failed: %v", ErrNotSubmitted, err)
 	}
 	var heldLen int
-	if _, err := fmt.Sscanf(filled, "inserted:%d", &heldLen); err != nil || heldLen < len(prompt) {
+	if err := chromedp.Run(rctx, chromedp.Evaluate(fmt.Sprintf(`(document.querySelector(%q).innerText||'').length`, composer), &heldLen)); err != nil {
+		return "", fmt.Errorf("%w: composer verify failed: %v", ErrNotSubmitted, err)
+	}
+	log.Printf("[meta] stage=composer_insert result=inserted held=%d prompt_bytes=%d", heldLen, len(prompt))
+	if heldLen < len(prompt) {
 		return "", fmt.Errorf("%w: short composer write held=%d want=%d", ErrNotSubmitted, heldLen, len(prompt))
 	}
 

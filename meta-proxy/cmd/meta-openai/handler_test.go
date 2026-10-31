@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -186,25 +185,27 @@ func TestRecoverRequiresSessionHeader(t *testing.T) {
 	}
 }
 func TestComposerFillContract(t *testing.T) {
-	// The composer contract the bridge depends on: bulk insert outcome is
-	// decided by the "inserted:<len>" prefix plus a held-length check, so a
-	// short or rejected write fails closed instead of sending a partial
-	// paste. This pins the wire format Ask parses.
-	for raw, ok := range map[string]bool{
-		"inserted:199834": true, "inserted:8": true,
-		"exec-false:0": false, "exec-error:x": false, "missing": false, "": false,
+	// The composer contract the bridge depends on: select-all must report
+	// "selected:*", then the held length must cover the prompt, or the
+	// write fails closed instead of sending a partial paste. This pins the
+	// decision rule Ask applies.
+	accept := func(selRes string, heldLen, want int) bool {
+		return strings.HasPrefix(selRes, "selected:") && heldLen >= want
+	}
+	for _, tc := range []struct {
+		selRes     string
+		held, want int
+		ok         bool
+	}{
+		{"selected:867", 199834, 199834, true},
+		{"selected:0", 8, 8, true},
+		{"missing", 0, 8, false},
+		{"select-error:x", 0, 8, false},
+		{"selected:867", 100, 199834, false},
+		{"", 0, 0, false},
 	} {
-		held := -1
-		accepted := strings.HasPrefix(raw, "inserted:")
-		if accepted {
-			var n int
-			if _, err := fmt.Sscanf(raw, "inserted:%d", &n); err != nil {
-				t.Fatalf("accept path must parse: %q", raw)
-			}
-			held = n
-		}
-		if accepted != ok || (ok && held < 0) {
-			t.Fatalf("contract mismatch for %q", raw)
+		if got := accept(tc.selRes, tc.held, tc.want); got != tc.ok {
+			t.Fatalf("contract mismatch for %+v", tc)
 		}
 	}
 }
