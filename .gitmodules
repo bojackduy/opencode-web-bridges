@@ -1,4 +1,0 @@
-[submodule "deepseek-proxy"]
-	path = deepseek-proxy
-	url = https://github.com/bojackduy/deepseek-proxy.git
-	branch = main
