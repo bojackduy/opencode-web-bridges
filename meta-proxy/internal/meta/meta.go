@@ -561,7 +561,11 @@ func (c *Client) waitForAnswerLocked(rctx, parent context.Context, before answer
 					return "", fmt.Errorf("meta: no answer within timeout: %w", rctx.Err())
 				case <-time.After(1 * time.Second):
 				}
-				return strings.TrimSpace(text), nil
+				rendered, rerr := c.renderAnswer(rctx)
+				if rerr != nil {
+					return "", rerr
+				}
+				return rendered, nil
 			}
 		}
 	}
@@ -588,7 +592,9 @@ func answerAdoptable(beforeCount, beforeBytes, count int, text string, hasCopy b
 }
 
 // newestAnswerCountJS counts candidate answer nodes; newestAnswerTextJS
-// returns the newest candidate answer text ("" when none).
+// returns the newest candidate answer text ("" when none);
+// newestAnswerHTMLJS returns its HTML for Markdown rendering (delivery
+// only — stability polling always compares plain text).
 const newestAnswerCountJS = `(function(){
   return document.querySelectorAll('div[role="article"][aria-label="Meta AI response"]').length;})()`
 
@@ -599,6 +605,13 @@ const newestAnswerTextJS = `(function(){
   // Prefer the markdown text container; fall back to innerText.
   var body=el.querySelector('[class*="text-response"]') || el;
   return (body.innerText||'').trim();})()`
+
+const newestAnswerHTMLJS = `(function(){
+  var n=document.querySelectorAll('div[role="article"][aria-label="Meta AI response"]');
+  if(!n.length) return '';
+  var el=n[n.length-1];
+  var body=el.querySelector('[class*="text-response"]') || el;
+  return body.outerHTML||'';})()`
 
 // ReadThreadTurn reads a specific turn (read-only, no submit). It verifies
 // the tab is on url, then returns the newest finished answer: two reads 2s
@@ -668,8 +681,26 @@ func (c *Client) readLatestLocked(ctx context.Context) (TurnResult, error) {
 	if strings.TrimSpace(second) == "" || second != first {
 		return TurnResult{}, errors.New("meta: answer not stable")
 	}
+	rendered, rerr := c.renderAnswer(ctx)
+	if rerr != nil {
+		return TurnResult{}, rerr
+	}
 	log.Printf("[meta] stage=read answer_bytes=%d", len(second))
-	return TurnResult{Answer: strings.TrimSpace(second)}, nil
+	return TurnResult{Answer: rendered}, nil
+}
+
+// renderAnswer fetches the finished answer once as HTML and converts it to
+// Markdown (wrapper-bearing text bypasses conversion untouched). Called
+// only after stability is proven on plain text.
+func (c *Client) renderAnswer(ctx context.Context) (string, error) {
+	var htmlFrag, text string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(newestAnswerHTMLJS, &htmlFrag)); err != nil {
+		return "", fmt.Errorf("meta: answer render failed: %v", err)
+	}
+	if err := chromedp.Run(ctx, chromedp.Evaluate(newestAnswerTextJS, &text)); err != nil {
+		return "", fmt.Errorf("meta: answer render failed: %v", err)
+	}
+	return answerToMarkdown(htmlFrag, text), nil
 }
 
 // ValidThreadURL is a validity check.
