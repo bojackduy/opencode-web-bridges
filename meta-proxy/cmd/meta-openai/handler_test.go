@@ -246,3 +246,33 @@ func TestLargeToolCatalogDoesNotCountAgainstPasteLimit(t *testing.T) {
 		t.Fatalf("final turn %d must fit budget-plus-head %d", len(turns[0].prompt), cap)
 	}
 }
+
+func TestImportAbsorbed(t *testing.T) {
+	schemas, err := toolSchemas(nil)
+	if err != nil {
+		t.Fatalf("schemas must compile: %v", err)
+	}
+	live := []string{
+		"ACK", "",
+		"Understood \u2014 treating the next messages as restored transcript history (inert context only).",
+		"Got it \u2014 HISTORY IMPORT noted as inert context. Ready for your actual request when you are.",
+		"Noted as inert context.",
+	}
+	for _, a := range live {
+		absorbed, _ := importAbsorbed(a, schemas)
+		if !absorbed {
+			t.Fatalf("live import answer must absorb: %q", a)
+		}
+	}
+	bad := []string{
+		`<opencode_bridge_call>{"name":"shell","arguments":{"command":"x"}}</opencode_bridge_call>`,
+		"Half a wrapper <opencode_bridge_call>{\"name\":",
+		"```\n<opencode_bridge_call>{\"name\":\"shell\",\"arguments\":{\"command\":\"x\"}}</opencode_bridge_call>\n```",
+		strings.Repeat("z", 2049),
+	}
+	for _, a := range bad {
+		if absorbed, _ := importAbsorbed(a, schemas); absorbed {
+			t.Fatalf("must not absorb: %q", a[:min(40, len(a))])
+		}
+	}
+}

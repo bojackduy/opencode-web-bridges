@@ -568,13 +568,27 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if t.replay {
-			got := strings.TrimSpace(answer)
-			if got != "ACK" && got != "" {
+			// Meta answers imports conversationally instead of ACKing
+			// (observed repeatedly: short prose referencing the import,
+			// e.g. "Understood — treating the next messages as restored
+			// transcript history"). A short wrapper-free answer proves the
+			// import was read and is accepted as absorbed. Anything
+			// executable, malformed, or long fails closed: a wrapper in an
+			// import answer is an execution attempt, and a long answer
+			// means the model went off-script.
+			absorbed, prose := importAbsorbed(answer, schemas)
+			if !absorbed {
+				log.Printf("[meta] stage=replay turn=%d/%d result=rejected-answer session=%s", i+1, len(allTurns), shortSID(sid))
 				h.mu.Lock()
 				h.saveLocked()
 				h.mu.Unlock()
-				h.writeError(w, http.StatusBadGateway, "server_error", "BACKEND FAILURE: history import did not acknowledge with ACK; session remains uncertain")
+				h.writeError(w, http.StatusBadGateway, "server_error", "BACKEND FAILURE: history import answer was not absorbable (executable, malformed, or overlong); session remains uncertain")
 				return
+			}
+			if prose {
+				log.Printf("[meta] stage=replay turn=%d/%d result=imported-with-prose bytes=%d session=%s", i+1, len(allTurns), len(strings.TrimSpace(answer)), shortSID(sid))
+			} else {
+				log.Printf("[meta] stage=replay turn=%d/%d result=acked session=%s", i+1, len(allTurns), shortSID(sid))
 			}
 			if t.synced > 0 {
 				h.mu.Lock()
@@ -622,6 +636,31 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	resp := h.buildCompletion(&req, answer, nil, calls, toolIDs, created, respID)
 	h.writeMetaChatResponse(w, &req, resp, "")
 	log.Printf("[openai] session=%s completed answer_bytes=%d duration=%s", shortSID(sid), len(answer), time.Since(started).Round(time.Millisecond))
+}
+
+// importAbsorbed decides whether a history-import answer counts the chunk
+// as absorbed: an exact ACK, empty text, or short wrapper-free prose.
+// Anything executable, malformed, or over 2KB fails closed. Pure function,
+// no browser.
+func importAbsorbed(answer string, schemas map[string]*jsonschema.Schema) (absorbed, prose bool) {
+	got := strings.TrimSpace(answer)
+	if got == "ACK" || got == "" {
+		return true, false
+	}
+	if len(got) > 2048 {
+		return false, false
+	}
+	// Any wrapper-shaped content (fenced or not, complete or not) is an
+	// execution attempt or a botched one — never an absorption. The raw
+	// text is checked because StripFences inside Extract would otherwise
+	// hide fenced examples as prose.
+	if strings.Contains(got, "<opencode_bridge_call") || strings.Contains(got, "```") || strings.Contains(got, "~~~") {
+		return false, false
+	}
+	if rcalls, rerr := meta.ExtractExecutableCalls(answer, schemas, "auto"); rerr == nil && len(rcalls) == 0 {
+		return true, true
+	}
+	return false, false
 }
 
 // turn is a single submission unit.
