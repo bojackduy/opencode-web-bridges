@@ -405,7 +405,18 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// Delta vs fresh.
 	var seedMsgs []message
 	var recordMsgs []message
-	var sysHead string
+	var teach []string
+	teachBytes := 0
+	// setTeach arms the tool teaching for this turn: instruction first,
+	// then one blob per tool (chunking never splits mid-tool).
+	setTeach := func() {
+		if instr, parts := systemPromptParts(req.Tools, choice); instr != "" {
+			teach = append([]string{instr}, parts...)
+			for _, t := range teach {
+				teachBytes += len(t) + 1
+			}
+		}
+	}
 	fresh := true
 	deltaKind := ""
 	if reseedPlan == nil && len(sess.Messages) > 0 && firstMismatch(req.Messages, sess.Messages) == nil {
@@ -431,8 +442,8 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			// untaught. Any tool-set change — including none-to-some —
 			// repays the full teaching once on this turn.
 			if len(req.Tools) > 0 && toolsFingerprint(req.Tools) != sess.ToolsFP {
-				if sys := systemPrompt(req.Tools, choice); sys != "" {
-					sysHead = sys + "\n\n"
+				setTeach()
+				if len(teach) > 0 {
 					log.Printf("[openai] session=%s teaching-debt repaid tools=%d", shortSID(sid), len(req.Tools))
 				}
 			}
@@ -442,10 +453,7 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if fresh {
-		sysHead = ""
-		if sys := systemPrompt(req.Tools, choice); sys != "" {
-			sysHead = sys + "\n\n"
-		}
+		setTeach()
 		if reseedPlan == nil && len(sess.Messages) > 0 && sess.URL != "" {
 			if mm := firstMismatch(req.Messages, sess.Messages); mm != nil {
 				log.Printf("[openai] session=%s prefix_mismatch index=%d field=%s confoff=%d incoming_messages=%d saved_messages=%d",
@@ -485,7 +493,7 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// Chunk into bounded turns.
 	limit := h.pasteLimit()
 	recordTurns := buildRecordTurns(recordMsgs, limit)
-	turns, terr := buildTurns(sysHead, seedMsgs, limit)
+	turns, terr := buildTurns(teach, seedMsgs, limit)
 	if terr != nil {
 		h.mu.Unlock()
 		h.writeError(w, http.StatusRequestEntityTooLarge, "invalid_request_error", terr.Error())
@@ -507,7 +515,7 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	replays := make([]bool, len(allTurns))
 	for i, t := range allTurns {
 		sizes[i], replays[i] = len(t.prompt), t.replay
-		if len(t.prompt) > pasteCap(limit, sysHead, t.replay) && limit > 0 {
+		if len(t.prompt) > pasteCap(limit, teachBytes, t.replay) && limit > 0 {
 			h.mu.Unlock()
 			h.writeError(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
 				fmt.Sprintf("turn %d/%d needs a %d-byte paste over the %d-byte single-paste limit. Nothing was sent and no tool was run.", i+1, len(allTurns), len(t.prompt), limit))
@@ -649,6 +657,15 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[openai] session=%s completed answer_bytes=%d duration=%s", shortSID(sid), len(answer), time.Since(started).Round(time.Millisecond))
 }
 
+// groupBytes is the joined size of one chunk group, for fit decisions.
+func groupBytes(g []string) int {
+	n := 0
+	for _, s := range g {
+		n += len(s) + 1
+	}
+	return n
+}
+
 // importAbsorbed decides whether a history-import answer counts the chunk
 // as absorbed: an exact ACK, empty text, or short wrapper-free prose.
 // Anything executable, malformed, or over 2KB fails closed. Pure function,
@@ -727,7 +744,7 @@ func chunkMetaTexts(texts []string, limit int) (groups [][]string, ends []int) {
 	return groups, ends
 }
 
-func buildTurns(sysHead string, msgs []message, limit int) ([]turn, error) {
+func buildTurns(teach []string, msgs []message, limit int) ([]turn, error) {
 	if len(msgs) == 0 {
 		return nil, nil
 	}
@@ -773,6 +790,14 @@ func buildTurns(sysHead string, msgs []message, limit int) ([]turn, error) {
 			turns = append(turns, turn{prompt: b.String(), replay: true, synced: ends[gi]})
 		}
 	}
+	// Teaching goes first so the model learns before the question. A small
+	// catalog rides the final turn exactly as before (byte-identical shape);
+	// an oversized one travels ahead as its own absorbed replay turns, one
+	// or more whole tools per turn, never split mid-tool.
+	teachBytes := 0
+	for _, t := range teach {
+		teachBytes += len(t) + 1
+	}
 	current := texts[cut:]
 	if limit > 0 {
 		for _, text := range current {
@@ -782,6 +807,22 @@ func buildTurns(sysHead string, msgs []message, limit int) ([]turn, error) {
 		}
 	}
 	groups, ends := chunkMetaTexts(current, pack)
+	teachOnFinal := len(teach) > 0 && len(groups) == 1 && pack > 0 && teachBytes+groupBytes(groups[0]) <= pack
+	if len(teach) > 0 && !teachOnFinal {
+		tgroups, _ := chunkMetaTexts(teach, pack)
+		for _, g := range tgroups {
+			var b strings.Builder
+			for _, seg := range g {
+				b.WriteString(seg + "\n")
+			}
+			b.WriteString(metaAckAsk)
+			turns = append(turns, turn{prompt: b.String(), replay: true})
+		}
+	}
+	var sysHead string
+	if teachOnFinal {
+		sysHead = strings.Join(teach, "\n") + "\n\n"
+	}
 	for i, g := range groups {
 		last := i == len(groups)-1
 		var b strings.Builder
@@ -846,14 +887,31 @@ func formatMessage(m message) string {
 }
 
 func systemPrompt(tools []toolDef, choice string) string {
-	if len(tools) == 0 {
+	instr, parts := systemPromptParts(tools, choice)
+	if instr == "" {
 		return ""
 	}
-	raw, _ := json.Marshal(tools)
-	return "You are a tool-using assistant. Available functions (JSON schemas):\n" + string(raw) +
+	return instr + "\n" + strings.Join(parts, "\n")
+}
+
+// systemPromptParts splits the teaching into standalone texts: the
+// instruction first, then one JSON blob per tool. Chunking never splits
+// mid-tool — a cut JSON half is unusable context, while whole-tool pieces
+// stay independently absorbable.
+func systemPromptParts(tools []toolDef, choice string) (string, []string) {
+	if len(tools) == 0 {
+		return "", nil
+	}
+	instr := "You are a tool-using assistant. Available functions (JSON schemas):\n" +
 		"\ntool_choice: " + choice + "\n" +
 		"To call a function, reply with ONLY one or more <opencode_bridge_call>{\"name\":\"...\",\"arguments\":{...}}</opencode_bridge_call> wrappers and no other text. " +
 		"Otherwise reply in plain text."
+	var parts []string
+	for _, t := range tools {
+		raw, _ := json.Marshal(t)
+		parts = append(parts, string(raw))
+	}
+	return instr, parts
 }
 
 func (h *handler) pasteLimit() int {
@@ -870,9 +928,9 @@ func (h *handler) pasteLimit() int {
 // the raw budget, while the answer-seeking turn additionally carries the
 // fixed teaching head (tool catalog), which is not changeable content and
 // must never count against the budget.
-func pasteCap(limit int, sysHead string, replay bool) int {
+func pasteCap(limit, headBytes int, replay bool) int {
 	if !replay {
-		return limit + len(sysHead)
+		return limit + headBytes
 	}
 	return limit
 }

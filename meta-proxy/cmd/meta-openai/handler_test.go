@@ -215,35 +215,74 @@ func TestComposerFillContract(t *testing.T) {
 }
 
 func TestPasteCapExcludesTeachingHead(t *testing.T) {
-	head := strings.Repeat("H", 300000)
-	if got := pasteCap(200000, head, true); got != 200000 {
+	if got := pasteCap(200000, 300000, true); got != 200000 {
 		t.Fatalf("replay turns obey the raw budget: %d", got)
 	}
-	if got := pasteCap(200000, head, false); got != 500000 {
+	if got := pasteCap(200000, 300000, false); got != 500000 {
 		t.Fatalf("final turn allows budget plus fixed head: %d", got)
 	}
-	if got := pasteCap(200000, "", false); got != 200000 {
+	if got := pasteCap(200000, 0, false); got != 200000 {
 		t.Fatalf("empty head changes nothing: %d", got)
 	}
 }
 
 func TestLargeToolCatalogDoesNotCountAgainstPasteLimit(t *testing.T) {
-	big := strings.Repeat("x", 300000)
-	tools := []toolDef{{Type: "function", Function: toolFunction{Name: "big", Parameters: map[string]any{"blob": big}}}}
-	head := systemPrompt(tools, "auto")
-	if len(head) <= 200000 {
-		t.Fatalf("test needs an over-budget head, got %d", len(head))
+	// Live shape (2026-10-31): ~40 small tools totaling over the budget.
+	// Each tool JSON must travel whole in exactly one absorbed replay turn;
+	// the tiny question rides the final turn alone.
+	var tools []toolDef
+	for i := 0; i < 40; i++ {
+		tools = append(tools, toolDef{Type: "function", Function: toolFunction{
+			Name:        "tool" + string(rune('a'+i%26)) + string(rune('0'+i%10)),
+			Description: "Test tool with padding " + strings.Repeat("x", 6000),
+			Parameters:  map[string]any{"arg": "y"},
+		}})
+	}
+	instr, parts := systemPromptParts(tools, "auto")
+	if instr == "" || len(parts) != 40 {
+		t.Fatalf("parts must be instruction plus one blob per tool: %d", len(parts))
+	}
+	teach := append([]string{instr}, parts...)
+	headBytes := 0
+	for _, tg := range teach {
+		headBytes += len(tg) + 1
+	}
+	if headBytes <= 200000 {
+		t.Fatalf("test needs an over-budget catalog, got %d", headBytes)
 	}
 	msgs := []message{{Role: "user", Content: "hi"}}
-	turns, err := buildTurns(head, msgs, 200000)
+	turns, err := buildTurns(teach, msgs, 200000)
 	if err != nil {
 		t.Fatalf("buildTurns must not refuse: %v", err)
 	}
-	if len(turns) != 1 || turns[0].replay {
-		t.Fatalf("tiny message plus catalog must be one final turn: %+v", turns)
+	if len(turns) < 2 {
+		t.Fatalf("over-budget teaching must split, got %d turns", len(turns))
 	}
-	if cap := pasteCap(200000, head, turns[0].replay); len(turns[0].prompt) > cap {
-		t.Fatalf("final turn %d must fit budget-plus-head %d", len(turns[0].prompt), cap)
+	for _, tr := range turns[:len(turns)-1] {
+		if !tr.replay {
+			t.Fatal("non-final destack turns must be absorbed replays")
+		}
+		if len(tr.prompt) > 200000 {
+			t.Fatalf("replay turn exceeds raw budget: %d", len(tr.prompt))
+		}
+	}
+	last := turns[len(turns)-1]
+	if last.replay {
+		t.Fatal("final turn must be answer-seeking")
+	}
+	for _, blob := range parts {
+		whole := 0
+		for _, tr := range turns {
+			if strings.Contains(tr.prompt, blob) {
+				whole++
+			}
+		}
+		if whole != 1 {
+			t.Fatalf("tool blob must travel whole in exactly one turn, found in %d", whole)
+		}
+	}
+	if cap := pasteCap(200000, headBytes, last.replay); len(last.prompt) > cap {
+		t.Fatalf("final turn %d must fit budget-plus-head %d", len(last.prompt), cap)
 	}
 }
 
