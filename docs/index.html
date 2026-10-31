@@ -76,7 +76,6 @@
     .btn-primary:hover { background: #CA8A04; text-decoration: none; transform: translateY(-1px); }
     .btn-secondary { background: transparent; color: var(--text); border-color: var(--border); }
     .btn-secondary:hover { background: var(--bg-soft); text-decoration: none; transform: translateY(-1px); }
-    /* Hero */
     .hero { padding: 120px 0 100px; border-bottom: 1px solid var(--border); position: relative; overflow: hidden; min-height: 85vh; display: flex; align-items: center; }
     .hero-bg {
       position: absolute; inset: 0; z-index: 0;
@@ -104,7 +103,7 @@
     /* Sticky scrollytelling section */
     .scrolly {
       position: relative;
-      min-height: 400vh;
+      min-height: 500vh;
     }
     .scrolly-sticky {
       position: sticky;
@@ -221,6 +220,16 @@
     footer a { color: var(--muted); }
     footer a:hover { color: var(--text); }
     .scroll-progress { position: fixed; top: 56px; left: 0; height: 3px; background: var(--accent); z-index: 11; width: 0%; transition: width .1s linear; }
+    .demo-video-container {
+      position: relative;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--code-bg);
+    }
+    .demo-video-container video {
+      display: block; width: 100%; height: auto;
+    }
     @media (max-width: 640px) {
       nav .links { display: none; }
       .hero { padding: 48px 0 40px; min-height: auto; }
@@ -234,73 +243,6 @@
       .reveal, .reveal-left, .reveal-right, .reveal-scale { opacity: 1; transform: none; }
       .stagger > * { opacity: 1; transform: none; }
       .scrolly-frame { opacity: 1; transform: none; position: static; }
-    }
-
-    /* Circular orbit animations */
-    .orbit-container {
-      position: relative; width: 300px; height: 300px; margin: 0 auto;
-    }
-    .orbit-center {
-      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 80px; height: 80px; border-radius: 50%;
-      background: var(--accent); color: #0F172A;
-      display: flex; align-items: center; justify-content: center;
-      font-family: var(--font-mono); font-size: 12px; font-weight: 700;
-      z-index: 2;
-    }
-    .orbit-item {
-      position: absolute; top: 50%; left: 50%;
-      width: 60px; height: 60px; border-radius: 50%;
-      background: var(--card); border: 1px solid var(--border);
-      display: flex; align-items: center; justify-content: center;
-      font-family: var(--font-mono); font-size: 10px; font-weight: 600; color: var(--text);
-      transform-origin: 0 0;
-      transition: transform .3s ease;
-    }
-    .orbit-item:hover { border-color: var(--accent); }
-    .orbit-ring {
-      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 220px; height: 220px; border-radius: 50%;
-      border: 1px dashed var(--border);
-    }
-    /* Rotating text on scroll */
-    .rotate-on-scroll { will-change: transform; }
-    /* Circular reveal */
-    .circle-reveal {
-      clip-path: circle(0% at 50% 50%);
-      transition: clip-path .8s cubic-bezier(.16,1,.3,1);
-    }
-    .circle-reveal.visible { clip-path: circle(75% at 50% 50%); }
-    /* Spinning accent */
-    .spin-accent {
-      display: inline-block; animation: spin 8s linear infinite;
-    }
-    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-    /* Orbit animation on scroll */
-    .orbit-animate { animation: orbit 20s linear infinite; }
-    @keyframes orbit { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-    /* Circular progress */
-    .circle-progress {
-      width: 80px; height: 80px; border-radius: 50%;
-      background: conic-gradient(var(--accent) 0deg, var(--border) 0deg);
-      display: flex; align-items: center; justify-content: center;
-    }
-    .circle-progress::before {
-      content: ''; position: absolute; width: 60px; height: 60px;
-      border-radius: 50%; background: var(--bg);
-    }
-    /* Pulsing ring */
-    .pulse-ring {
-      position: relative;
-    }
-    .pulse-ring::after {
-      content: ''; position: absolute; inset: -4px;
-      border-radius: 50%; border: 2px solid var(--accent);
-      animation: pulse 2s ease-out infinite;
-    }
-    @keyframes pulse {
-      0% { transform: scale(1); opacity: 1; }
-      100% { transform: scale(1.5); opacity: 0; }
     }
   </style>
 </head>
@@ -339,7 +281,7 @@
     </div>
   </header>
 
-  <!-- Sticky scrollytelling section with visual components -->
+  <!-- Sticky scrollytelling section with visual components including demo video -->
   <div class="scrolly" id="engines">
     <div class="scrolly-sticky">
       <div class="container">
@@ -348,54 +290,70 @@
           <div class="dot"></div>
           <div class="dot"></div>
           <div class="dot"></div>
+          <div class="dot"></div>
         </div>
         <div class="scrolly-frame active" data-frame="0">
           <div class="frame-inner">
-            <h2>Four engines, one plugin</h2>
-            <p class="lead">Pick the one whose subscription you already hold.</p>
+            <div class="orbit-container">
+              <div class="orbit-ring"></div>
+              <div class="orbit-center">bridge</div>
+              <div class="orbit-item" style="transform: translate(-50%, -50%) translate(110px, 0) rotate(0deg);">ChatGPT</div>
+              <div class="orbit-item" style="transform: translate(-50%, -50%) translate(0, 110px) rotate(0deg);">Gemini</div>
+              <div class="orbit-item" style="transform: translate(-50%, -50%) translate(-110px, 0) rotate(0deg);">DeepSeek</div>
+              <div class="orbit-item" style="transform: translate(-50%, -50%) translate(0, -110px) rotate(0deg);">Meta AI</div>
+            </div>
+            <h2 style="margin-top: 24px;">Four engines, one plugin</h2>
+            <p class="lead" style="margin: 0 auto;">Scroll to explore each engine.</p>
+          </div>
+        </div>
+        <div class="scrolly-frame" data-frame="1">
+          <div class="frame-inner">
             <div class="scrolly-card">
               <div class="icon">1</div>
               <h3>ChatGPT Web</h3>
               <p>Full feature set: projects per session, thread reuse, media inputs. Needs Chrome and a dedicated profile.</p>
             </div>
-          </div>
-        </div>
-        <div class="scrolly-frame" data-frame="1">
-          <div class="frame-inner">
-            <h2>Four engines, one plugin</h2>
-            <p class="lead">Pick the one whose subscription you already hold.</p>
             <div class="scrolly-card">
-              <div class="icon">2</div>
-              <h3>Gemini Web</h3>
-              <p>Text-only browser engine. Build locally, no published release. Own tab, profile and CDP port. Batch support for large inputs.</p>
+              <div class="icon">CDP</div>
+              <h3>Chrome DevTools Protocol</h3>
+              <p>Drives your logged-in Chrome profile. No API key needed.</p>
             </div>
           </div>
         </div>
         <div class="scrolly-frame" data-frame="2">
           <div class="frame-inner">
-            <h2>Four engines, one plugin</h2>
-            <p class="lead">Pick the one whose subscription you already hold.</p>
+            <div class="scrolly-card">
+              <div class="icon">2</div>
+              <h3>Gemini Web</h3>
+              <p>Text-only browser engine. Build locally, no published release. Own tab, profile and CDP port. Batch support for large inputs.</p>
+            </div>
             <div class="scrolly-card">
               <div class="icon">3</div>
               <h3>DeepSeek Web</h3>
-              <p>Speaks the web API directly. No Chrome, no CDP. Needs a userToken from a signed-in session. Tool call fix for reliable extraction.</p>
+              <p>Speaks the web API directly. No Chrome, no CDP. Needs a userToken. Tool call fix for reliable extraction.</p>
             </div>
           </div>
         </div>
         <div class="scrolly-frame" data-frame="3">
           <div class="frame-inner">
-            <h2>Four engines, one plugin</h2>
-            <p class="lead">Pick the one whose subscription you already hold.</p>
             <div class="scrolly-card">
               <div class="icon">4</div>
               <h3>Meta AI Web</h3>
               <p>Meta AI models via browser session. Dedicated Chrome profile on port 9224. No API key needed.</p>
             </div>
+            <div class="demo-video-container">
+              <video id="demo-video" muted playsinline preload="metadata" poster="demo-gemini.png" style="display: block; width: 100%; height: auto; cursor: pointer;">
+                <source src="demo-gemini.mp4" type="video/mp4" />
+                <source src="demo-gemini.gif" type="image/gif" />
+                <img src="demo-gemini.png" alt="Gemini web session driven by opencode-web-bridges" style="display: block; width: 100%; height: auto;" />
+              </video>
+            </div>
+            <p style="font-size: 13px; color: var(--muted); margin-top: 8px;">Live demo: OpenCode TUI + Gemini browser. Click to replay.</p>
           </div>
         </div>
       </div>
     </div>
-  </section>
+  </div>
 
   <section id="browse">
     <div class="container">
@@ -433,44 +391,6 @@
           <p>Full license text.</p>
         </a>
       </div>
-    </div>
-  </section>
-
-  <section id="demo">
-    <div class="container">
-      <h2 class="reveal">Demo</h2>
-      <p class="lead reveal">A real run: OpenCode sends a prompt, the bridge drives your logged-in Gemini tab, and the reply comes back. No API key.</p>
-      <figure class="reveal reveal-scale" style="margin: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg);">
-        <video id="demo-video" muted playsinline preload="metadata" poster="demo-gemini.png" style="display: block; width: 100%; height: auto; cursor: pointer;">
-          <source src="demo-gemini.mp4" type="video/mp4" />
-          <source src="demo-gemini.gif" type="image/gif" />
-          <img src="demo-gemini.png" alt="Gemini web session driven by opencode-web-bridges" style="display: block; width: 100%; height: auto;" />
-        </video>
-        <figcaption style="padding: 10px 14px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--border);">Live demo: OpenCode TUI with the gemini-web model selected. A prompt is sent, the bridge drives your logged-in Gemini tab, and the reply comes back. Captured via asciinema (terminal) + Chrome DevTools Protocol (browser). Click the video to replay.</figcaption>
-      </figure>
-      <script>
-        (function () {
-          var v = document.getElementById('demo-video');
-          if (!v) return;
-          var played = false;
-          var io = new IntersectionObserver(function (entries) {
-            entries.forEach(function (e) {
-              if (e.isIntersecting && !played) {
-                played = true;
-                v.play().catch(function () {});
-              }
-            });
-          }, { threshold: 0.5 });
-          io.observe(v);
-          v.addEventListener('click', function () {
-            v.currentTime = 0;
-            v.play().catch(function () {});
-          });
-          v.addEventListener('ended', function () {
-            v.pause();
-          });
-        })();
-      </script>
     </div>
   </section>
 
