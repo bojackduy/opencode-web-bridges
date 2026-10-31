@@ -686,7 +686,7 @@ var (
 var ErrThreadBinding = errors.New("meta thread binding error")
 
 func IsPreSubmit(err error) bool {
-	return errors.Is(err, ErrNoComposer) || errors.Is(err, ErrNotLoggedIn) ||
+	return errors.Is(err, ErrNotSubmitted) || errors.Is(err, ErrNoComposer) || errors.Is(err, ErrNotLoggedIn) ||
 		errors.Is(err, ErrForeignDraft) || errors.Is(err, ErrDraftOwned)
 }
 func IsNavigateError(err error) bool {

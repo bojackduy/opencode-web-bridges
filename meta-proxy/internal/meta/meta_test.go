@@ -2,18 +2,19 @@ package meta
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
 func TestAnswerAdoptable(t *testing.T) {
 	cases := []struct {
-		name         string
-		beforeCount  int
-		beforeBytes  int
-		count        int
-		text         string
-		hasCopy      bool
-		wantAdopt    bool
+		name        string
+		beforeCount int
+		beforeBytes int
+		count       int
+		text        string
+		hasCopy     bool
+		wantAdopt   bool
 	}{
 		{"no copy button blocks", 1, 10, 5, "new answer text", false, false},
 		{"blank never adopted", 1, 10, 5, "   ", true, false},
@@ -51,8 +52,15 @@ func TestIsPreSubmit(t *testing.T) {
 	if !IsPreSubmit(ErrNotLoggedIn) {
 		t.Fatal("want ErrNotLoggedIn pre-submit")
 	}
-	if IsPreSubmit(ErrNotSubmitted) {
-		t.Fatal("want ErrNotSubmitted NOT pre-submit (may have fired)")
+	// Every composer-fill failure wraps ErrNotSubmitted and fires before
+	// anything is typed or sent: pending must clear, never wedge. Live
+	// case: short write held=190217 want=190786 kept pending and fenced
+	// the retry with a manufactured 422.
+	if !IsPreSubmit(ErrNotSubmitted) {
+		t.Fatal("want ErrNotSubmitted pre-submit (proven nothing sent)")
+	}
+	if !IsPreSubmit(fmt.Errorf("short composer write held=190217 want=190786: %w", ErrNotSubmitted)) {
+		t.Fatal("want wrapped composer failure pre-submit")
 	}
 	if IsPreSubmit(errors.New("meta: no answer within timeout")) {
 		t.Fatal("want timeout NOT pre-submit")
