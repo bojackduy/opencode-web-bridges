@@ -29,6 +29,8 @@ func run() error {
 	chrome := flag.String("chrome", "", "Chrome binary")
 	background := flag.Bool("background", false, "minimize Chrome")
 	model := flag.String("model", "meta-web", "model ID")
+	maxChars := flag.Int("max-chars", 200000, "maximum bytes per Meta turn")
+	maxPaste := flag.Int("max-paste-bytes", 0, "maximum bytes one submission may carry (0 disables, per-turn budget alone applies)")
 	state := flag.String("state", filepath.Join(defaultProfile(), "openai-sessions.json"), "persistent session state")
 	flag.Parse()
 
@@ -36,7 +38,7 @@ func run() error {
 	cg.Background = *background
 	defer cg.Close()
 
-	h := &handler{client: cg, model: *model, statePath: *state, profileDir: *profile, gate: make(chan struct{}, 1)}
+	h := &handler{client: cg, model: *model, maxChars: *maxChars, maxPaste: *maxPaste, statePath: *state, profileDir: *profile, gate: make(chan struct{}, 1)}
 	h.gate <- struct{}{}
 	if err := h.load(); err != nil {
 		return err

@@ -1,13 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,26 +50,51 @@ type chatRequest struct {
 	Stream      bool      `json:"stream,omitempty"`
 }
 
+// session mirrors gemini's session with full recovery fields.
 type session struct {
 	Pending         bool      `json:"pending,omitempty"`
 	PendingPrompt   string    `json:"pending_prompt,omitempty"`
 	PendingMessages []message `json:"pending_messages,omitempty"`
 	PendingTools    []toolDef `json:"pending_tools,omitempty"`
 	PendingChoice   any       `json:"pending_choice,omitempty"`
-	Messages        []message `json:"messages"`
-	URL             string    `json:"url,omitempty"`
+	PendingReqHash  string    `json:"pending_req_hash,omitempty"`
+
+	Messages     []message `json:"messages"`
+	LastAnswer   string    `json:"last_answer,omitempty"`
+	LastReqHash  string    `json:"last_req_hash,omitempty"`
+	LastRespID   string    `json:"last_resp_id,omitempty"`
+	LastCreated  int64     `json:"last_created,omitempty"`
+	LastToolIDs  []string  `json:"last_tool_ids,omitempty"`
+	URL          string    `json:"url,omitempty"`
+	ToolsFP      string    `json:"tools_fp,omitempty"`
+	ReseedFrom   string    `json:"reseed_from,omitempty"`
+	ReseedEvidence string  `json:"reseed_evidence,omitempty"`
 }
 
-// removed browserClient interface - handler uses *meta.Client directly
+type browserClient interface {
+	Ask(ctx context.Context, prompt string, newSession bool, timeout time.Duration) (string, error)
+	CurrentURL(ctx context.Context) string
+	LoginState(ctx context.Context) (*meta.Status, error)
+	ReadThreadTurn(ctx context.Context, url, prompt string) (meta.TurnResult, error)
+	ReadLatestThreadTurn(ctx context.Context, url string) (string, meta.TurnResult, error)
+}
 
 type handler struct {
 	client     *meta.Client
 	model      string
+	maxChars   int
+	maxPaste   int
 	statePath  string
 	profileDir string
-	gate       chan struct{}
-	mu         sync.Mutex
-	sessions   map[string]*session
+
+	mu       sync.Mutex
+	sessions map[string]*session
+
+	gate      chan struct{}
+	activeSID string
+	hasActive bool
+
+	adoptWait time.Duration
 }
 
 func (h *handler) load() error {
@@ -86,15 +113,21 @@ func (h *handler) load() error {
 }
 
 func (h *handler) saveLocked() error {
+	if h.statePath == "" {
+		return nil
+	}
 	raw, err := json.Marshal(h.sessions)
 	if err != nil {
+		log.Printf("[openai] save marshal: %v", err)
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(h.statePath), 0o700); err != nil {
+		log.Printf("[openai] save mkdir: %v", err)
 		return err
 	}
 	tmp := h.statePath + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		log.Printf("[openai] save write: %v", err)
 		return err
 	}
 	return os.Rename(tmp, h.statePath)
@@ -128,6 +161,152 @@ func (h *handler) sessionID(r *http.Request) string {
 	return ""
 }
 
+func shortSID(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
+}
+
+func reqHash(req *chatRequest) string {
+	raw, _ := json.Marshal(req)
+	sum := sha256Sum(string(raw))
+	return sum
+}
+
+func toolsFingerprint(tools []toolDef) string {
+	raw, _ := json.Marshal(tools)
+	return sha256Sum(string(raw))
+}
+
+func textOf(m message) string {
+	switch c := m.Content.(type) {
+	case string:
+		return c
+	case nil:
+		return ""
+	default:
+		raw, _ := json.Marshal(c)
+		var parts []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(raw, &parts); err != nil {
+			return string(raw)
+		}
+		var b strings.Builder
+		for _, p := range parts {
+			if p.Type == "text" || (p.Type == "" && p.Text != "") {
+				b.WriteString(p.Text)
+			}
+		}
+		return b.String()
+	}
+}
+
+func canonicalEqual(a, b message) bool {
+	if a.Role != b.Role || a.Name != b.Name || a.ToolCallID != b.ToolCallID {
+		return false
+	}
+	if textOf(a) != textOf(b) {
+		return false
+	}
+	if len(a.ToolCalls) != len(b.ToolCalls) {
+		return false
+	}
+	for i := range a.ToolCalls {
+		if a.ToolCalls[i].ID != b.ToolCalls[i].ID ||
+			a.ToolCalls[i].Function.Name != b.ToolCalls[i].Function.Name ||
+			!jsonEqual(a.ToolCalls[i].Function.Arguments, b.ToolCalls[i].Function.Arguments) {
+			return false
+		}
+	}
+	return true
+}
+
+func jsonEqual(a, b string) bool {
+	if a == b {
+		return true
+	}
+	var va, vb any
+	if json.Unmarshal([]byte(a), &va) != nil || json.Unmarshal([]byte(b), &vb) != nil {
+		return false
+	}
+	ra, _ := json.Marshal(va)
+	rb, _ := json.Marshal(vb)
+	return string(ra) == string(rb)
+}
+
+func toolSchemas(tools []toolDef) (map[string]*jsonschema.Schema, error) {
+	out := map[string]*jsonschema.Schema{}
+	for _, t := range tools {
+		if t.Type != "" && t.Type != "function" {
+			continue
+		}
+		compiler := jsonschema.NewCompiler()
+		compiler.UseLoader(localSchemas{})
+		b, err := json.Marshal(t.Function.Parameters)
+		if err != nil {
+			return nil, err
+		}
+		var schema any
+		if len(b) == 0 || string(b) == "null" {
+			schema = map[string]any{"type": "object"}
+		} else if err = json.Unmarshal(b, &schema); err != nil {
+			return nil, err
+		}
+		if err = compiler.AddResource("https://proxy.local/tool.json", schema); err != nil {
+			return nil, err
+		}
+		s, err := compiler.Compile("https://proxy.local/tool.json")
+		if err != nil {
+			return nil, fmt.Errorf("tool %q schema: %w", t.Function.Name, err)
+		}
+		out[t.Function.Name] = s
+	}
+	return out, nil
+}
+
+type localSchemas struct{}
+
+func (localSchemas) Load(url string) (any, error) {
+	return nil, fmt.Errorf("external schema references disabled: %s", url)
+}
+
+func effectiveToolChoice(raw any, nTools int) string {
+	if nTools == 0 {
+		return "none"
+	}
+	if raw == nil {
+		return "auto"
+	}
+	switch v := raw.(type) {
+	case string:
+		return v
+	case map[string]any:
+		if fn, ok := v["function"].(map[string]any); ok {
+			if name, ok := fn["name"].(string); ok {
+				return name
+			}
+		}
+		return "auto"
+	default:
+		return "auto"
+	}
+}
+
+// browserClient assertion: *meta.Client satisfies browserClient.
+var _ browserClient = (*meta.Client)(nil)
+
+func (h *handler) writeError(w http.ResponseWriter, status int, code, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	log.Printf("[openai] refused status=%d code=%s msg=%.300s", status, code, msg)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error": map[string]any{"message": msg, "type": code, "code": code},
+	})
+}
+
 func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	var req chatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -150,6 +329,7 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	choice := effectiveToolChoice(req.ToolChoice, len(req.Tools))
 
 	sid := h.sessionID(r)
+	hash := reqHash(&req)
 
 	select {
 	case <-h.gate:
@@ -165,74 +345,510 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		sess = &session{}
 		h.sessions[sid] = sess
 	}
-	_ = sess
-	h.mu.Unlock()
+	log.Printf("[openai] session=%s request in=%d saved=%d thread=%s pending=%v", shortSID(sid), len(req.Messages), len(sess.Messages), threadLabel(sess.URL), sess.Pending)
 
-	// Build prompt from last user message (minimal).
-	var prompt string
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == "user" {
-			if s, ok := req.Messages[i].Content.(string); ok {
-				prompt = s
-				break
+	// Exact last-request retry cache.
+	if sess.LastReqHash == hash && sess.LastRespID != "" {
+		if sess.LastAnswer != "" {
+			calls, verr := metaExtractCalls(sess.LastAnswer, schemas, choice)
+			if verr == nil {
+				resp := h.buildCompletion(&req, sess.LastAnswer, nil, calls, sess.LastToolIDs, sess.LastCreated, sess.LastRespID)
+				h.mu.Unlock()
+				h.writeMetaChatResponse(w, &req, resp, "")
+				return
 			}
 		}
 	}
-	if prompt == "" {
-		h.writeError(w, http.StatusBadRequest, "invalid_request_error", "no user message")
+
+	// Pending-turn fencing.
+	dirtyUncertain := false
+	var reseedPlan *rewritePlan
+	if sess.Pending {
+		unbound := len(sess.PendingMessages) == 0 && sess.PendingPrompt == ""
+		same := len(sess.PendingMessages) == 0 || len(req.Messages) == len(sess.PendingMessages)
+		if len(sess.PendingMessages) != 0 && same {
+			for i := range req.Messages {
+				if !canonicalEqual(req.Messages[i], sess.PendingMessages[i]) {
+					same = false
+					break
+				}
+			}
+		}
+		if same || !coherentTranscript(req.Messages) {
+			msg := "previous submission is uncertain; use explicit recovery to read it back, or send a distinct request; no automatic resubmission"
+			if unbound {
+				msg = "pending uncertain turn; inspect owned chat, or clear an unresolvable record explicitly via POST /v1/sessions/abandon; no automatic resubmission"
+			}
+			h.mu.Unlock()
+			h.writeError(w, http.StatusUnprocessableEntity, "pending_turn", msg+"; "+h.sentDiagnosis(sid, sess))
+			return
+		}
+		// Dirty adopt-first (bounded, read-only).
+		h.mu.Unlock()
+		adopted := h.tryAdoptInterrupted(sid, sess)
+		h.mu.Lock()
+		if adopted {
+			log.Printf("[openai] session=%s dirty-adopted interrupted turn; continuing without reseed", shortSID(sid))
+		} else {
+			reseedPlan = h.planDirtyReseed(sid, sess, req.Messages)
+			dirtyUncertain = true
+			next := *sess
+			next.URL, next.Messages = "", nil
+			next.LastReqHash, next.LastRespID = "", ""
+			clearPendingBinding(&next)
+			sess = &next
+			h.sessions[sid] = sess
+			log.Printf("[openai] continuation reason=uncertain_branch incoming_messages=%d planned=%v", len(req.Messages), reseedPlan != nil)
+		}
+	}
+
+	// Delta vs fresh.
+	var seedMsgs []message
+	var recordMsgs []message
+	var sysHead string
+	fresh := true
+	deltaKind := ""
+	if reseedPlan == nil && len(sess.Messages) > 0 && firstMismatch(req.Messages, sess.Messages) == nil {
+		deltaKind = "exact"
+	} else if reseedPlan == nil && len(sess.Messages) > 0 {
+		if ok, skipped := echoBloatSkipped(sess.Messages, req.Messages, 1024); ok {
+			if skipped > 0 {
+				log.Printf("[openai] session=%s tolerant-prefix skipped=%dB echo-bloat absorbed", shortSID(sid), skipped)
+			}
+			deltaKind = "echo"
+		} else if systemOnlyDivergence(sess.Messages, req.Messages) && sess.ToolsFP != "" && toolsFingerprint(req.Tools) != sess.ToolsFP {
+			log.Printf("[openai] session=%s system-prompt regenerated tools-changed; continuing delta under stored instructions", shortSID(sid))
+			deltaKind = "system"
+		}
+	}
+	if deltaKind != "" {
+		if meta.ValidThreadURL(sess.URL) {
+			fresh = false
+			seedMsgs = req.Messages[len(sess.Messages):]
+		} else {
+			log.Printf("[openai] session=%s delta-refused reason=missing-or-invalid-target incoming_messages=%d saved_messages=%d",
+				shortSID(sid), len(req.Messages), len(sess.Messages))
+		}
+	}
+	if fresh {
+		sysHead = ""
+		if sys := systemPrompt(req.Tools, choice); sys != "" {
+			sysHead = sys + "\n\n"
+		}
+		if reseedPlan == nil && len(sess.Messages) > 0 && sess.URL != "" {
+			if mm := firstMismatch(req.Messages, sess.Messages); mm != nil {
+				log.Printf("[openai] session=%s prefix_mismatch index=%d field=%s confoff=%d incoming_messages=%d saved_messages=%d",
+					shortSID(sid), mm.Index, mm.Field, mm.ContentOff, len(req.Messages), len(sess.Messages))
+				reseedPlan = planCleanReseed(sess, req.Messages)
+				if reseedPlan != nil {
+					log.Printf("[openai] session=%s rewrite_reseed classification=%s carried=%d not_carried=%d old=%s",
+						shortSID(sid), reseedPlan.classification, len(reseedPlan.carriedIDs), len(reseedPlan.notCarried), reseedPlan.oldURL)
+				}
+			}
+		}
+		if reseedPlan != nil {
+			recordMsgs = reseedPlan.carried
+		}
+		// Compaction-append.
+		appending := false
+		appendStart := 0
+		if reseedPlan != nil && reseedPlan.classification == rewriteCompaction && !dirtyUncertain &&
+			reseedPlan.mismatchField == "content" && len(sess.Messages) > 0 &&
+			reseedPlan.mismatchIndex >= len(sess.Messages)*9/10 &&
+			coherentTranscript(req.Messages) {
+			appending = true
+			appendStart = reseedPlan.mismatchIndex
+			fresh = false
+			seedMsgs = req.Messages[appendStart:]
+			recordMsgs = nil
+			log.Printf("[openai] session=%s compaction-append mismatch=%d prefix=%d/%d thread=%s",
+				shortSID(sid), appendStart, appendStart, len(sess.Messages), sess.URL)
+		}
+		if !appending {
+			seedMsgs = req.Messages
+		}
+		_ = appending
+		_ = appendStart
+	}
+
+	// Chunk into bounded turns.
+	limit := h.pasteLimit()
+	recordTurns := buildRecordTurns(recordMsgs, limit)
+	turns, terr := buildTurns(sysHead, seedMsgs, limit)
+	if terr != nil {
+		h.mu.Unlock()
+		h.writeError(w, http.StatusRequestEntityTooLarge, "invalid_request_error", terr.Error())
+		return
+	}
+	allTurns := append(recordTurns, turns...)
+	seedBase := 0
+	if !fresh {
+		seedBase = len(sess.Messages)
+	}
+
+	// Paste ceiling check before journaling.
+	sizes := make([]int, len(allTurns))
+	replays := make([]bool, len(allTurns))
+	for i, t := range allTurns {
+		sizes[i], replays[i] = len(t.prompt), t.replay
+		if len(t.prompt) > limit && limit > 0 {
+			h.mu.Unlock()
+			h.writeError(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
+				fmt.Sprintf("turn %d/%d needs a %d-byte paste over the %d-byte single-paste limit. Nothing was sent and no tool was run.", i+1, len(allTurns), len(t.prompt), limit))
+			return
+		}
+	}
+	log.Printf("[openai] session=%s plan turns=%d sizes=%v replay=%v paste_limit=%d seed=%d", shortSID(sid), len(allTurns), sizes, replays, limit, len(seedMsgs))
+	if len(allTurns) == 0 {
+		h.mu.Unlock()
+		h.writeError(w, http.StatusBadRequest, "invalid_request_error", "no submission turns")
 		return
 	}
 
-	// Mark pending before submit.
-	h.mu.Lock()
+	canonical := append([]message{}, req.Messages...)
+	finalPrompt := allTurns[len(allTurns)-1].prompt
 	sess.Pending = true
-	sess.PendingPrompt = prompt
-	sess.PendingMessages = append([]message{}, req.Messages...)
+	sess.PendingPrompt = finalPrompt
+	sess.PendingMessages = canonical
 	sess.PendingTools = req.Tools
 	sess.PendingChoice = req.ToolChoice
-	h.mu.Unlock()
-
-	answer, err := h.client.Ask(r.Context(), prompt, sess.URL == "", 10*time.Minute)
-	if err != nil {
-		h.writeError(w, http.StatusBadGateway, "server_error", "BACKEND FAILURE: "+err.Error())
-		return
-	}
-
-	// Validate tool protocol (strict: never weaken).
-	calls, verr := meta.ExtractExecutableCalls(answer, schemas, choice)
-	if verr != nil && choice == "required" {
-		h.writeError(w, http.StatusUnprocessableEntity, "invalid_request_error", "tool-protocol validation failed: "+verr.Error())
-		h.mu.Lock()
-		sess.Pending = false
-		h.mu.Unlock()
-		return
-	}
-	_ = calls
-
-	// Clear pending, store result.
-	h.mu.Lock()
-	sess.Pending = false
-	sess.PendingPrompt = ""
-	sess.Messages = append([]message{}, req.Messages...)
-	sess.Messages = append(sess.Messages, message{Role: "assistant", Content: answer})
-	sess.URL = h.client.CurrentURL(r.Context())
+	sess.PendingReqHash = hash
+	h.sessions[sid] = sess
 	h.saveLocked()
 	h.mu.Unlock()
 
-	resp := map[string]any{
-		"id":      fmt.Sprintf("chatcmpl-meta-%d", time.Now().Unix()),
-		"object":  "chat.completion",
-		"created": time.Now().Unix(),
-		"model":   h.model,
-		"choices": []map[string]any{{
-			"index":         0,
-			"message":       map[string]any{"role": "assistant", "content": answer},
-			"finish_reason": "stop",
-		}},
+	bound := sess.URL
+
+	started := time.Now()
+	var answer string
+	var err2 error
+	for i, t := range allTurns {
+		turnFresh := fresh && i == 0
+		if !turnFresh && !meta.ValidThreadURL(bound) {
+			h.mu.Lock()
+			clearPendingBinding(sess)
+			h.saveLocked()
+			h.mu.Unlock()
+			h.writeError(w, http.StatusBadGateway, "server_error", "BACKEND FAILURE: thread binding missing-or-invalid-target; nothing was sent and no new chat was started.")
+			return
+		}
+		log.Printf("[openai] session=%s stage=browser-start turn=%d/%d fresh=%v prompt_bytes=%d", shortSID(sid), i+1, len(allTurns), turnFresh, len(t.prompt))
+		h.mu.Lock()
+		h.saveLocked()
+		h.mu.Unlock()
+		answer, err2 = h.client.Ask(r.Context(), t.prompt, turnFresh, 10*time.Minute)
+		if err2 != nil {
+			log.Printf("[openai] session=%s stage=browser-failed turn=%d/%d err=%v", shortSID(sid), i+1, len(allTurns), err2)
+			h.mu.Lock()
+			if meta.IsPreSubmit(err2) || errors.Is(err2, meta.ErrNoComposer) || errors.Is(err2, meta.ErrNotLoggedIn) {
+				clearPendingBinding(sess)
+			}
+			h.saveLocked()
+			h.mu.Unlock()
+			if errors.Is(err2, meta.ErrNotLoggedIn) {
+				h.writeError(w, http.StatusUnauthorized, "authentication_error", "not logged in to meta.ai")
+				return
+			}
+			if errors.Is(err2, meta.ErrThreadBinding) {
+				h.writeError(w, http.StatusBadGateway, "server_error", "BACKEND FAILURE: thread binding failed ("+err2.Error()+"); nothing was sent and no new chat was started. The saved thread and transcript are retained; retry the same request.")
+				return
+			}
+			h.writeError(w, http.StatusBadGateway, "server_error", "BACKEND FAILURE: "+err2.Error())
+			return
+		}
+		// Capture thread URL for binding next chunk.
+		if cur := h.client.CurrentURL(r.Context()); meta.ValidThreadURL(cur) {
+			if bound == "" || fresh {
+				bound = cur
+			}
+		}
+		if t.replay {
+			got := strings.TrimSpace(answer)
+			if got != "ACK" && got != "" {
+				h.mu.Lock()
+				h.saveLocked()
+				h.mu.Unlock()
+				h.writeError(w, http.StatusBadGateway, "server_error", "BACKEND FAILURE: history import did not acknowledge with ACK; session remains uncertain")
+				return
+			}
+			if t.synced > 0 {
+				h.mu.Lock()
+				sess.Messages = append([]message{}, req.Messages[:seedBase+t.synced]...)
+				h.saveLocked()
+				h.mu.Unlock()
+			}
+			continue
+		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
-	log.Printf("[openai] session=%s completed answer_bytes=%d", shortSID(sid), len(answer))
+
+	// Protocol validation (strict, never weaken).
+	calls, verr := meta.ExtractExecutableCalls(answer, schemas, choice)
+	if verr != nil {
+		h.mu.Lock()
+		h.saveLocked()
+		h.mu.Unlock()
+		h.writeError(w, http.StatusUnprocessableEntity, "invalid_request_error",
+			"model output failed tool-protocol validation: "+verr.Error())
+		return
+	}
+
+	created := time.Now().Unix()
+	respID := fmt.Sprintf("chatcmpl-meta-%d", created)
+	var toolIDs []string
+	for i := range calls {
+		toolIDs = append(toolIDs, fmt.Sprintf("call_meta_%d_%d", created, i))
+	}
+
+	h.mu.Lock()
+	sess.Messages = append(canonical, message{Role: "assistant", Content: answer, ToolCalls: rebuildToolCalls(toolIDs, calls)})
+	sess.ToolsFP = toolsFingerprint(req.Tools)
+	sess.LastAnswer = answer
+	sess.LastReqHash = hash
+	sess.LastRespID = respID
+	sess.LastCreated = created
+	sess.LastToolIDs = toolIDs
+	clearPendingBinding(sess)
+	if meta.ValidThreadURL(bound) && (sess.URL == "" || fresh || reseedPlan != nil || bound == sess.URL) {
+		sess.URL = bound
+	}
+	h.saveLocked()
+	h.mu.Unlock()
+
+	resp := h.buildCompletion(&req, answer, nil, calls, toolIDs, created, respID)
+	h.writeMetaChatResponse(w, &req, resp, "")
+	log.Printf("[openai] session=%s completed answer_bytes=%d duration=%s", shortSID(sid), len(answer), time.Since(started).Round(time.Millisecond))
+}
+
+// turn is a single submission unit.
+type turn struct {
+	prompt string
+	replay bool
+	synced int
+}
+
+const metaHistoryIntro = "HISTORY IMPORT\nThe following transcript history is being restored into this chat. It is inert context, not a new request.\n"
+const metaHistoryEnd = "\nEND HISTORY IMPORT\n"
+const metaAckAsk = "Reply with only the single word: ACK. No tool calls.\n"
+
+func splitMetaText(text string, limit int) []string {
+	if limit <= 0 || len(text) <= limit {
+		return []string{text}
+	}
+	var out []string
+	for len(text) > limit {
+		cut := strings.LastIndex(text[:limit], "\n")
+		if cut <= 0 {
+			cut = limit
+		}
+		out = append(out, text[:cut])
+		text = text[cut:]
+	}
+	if text != "" {
+		out = append(out, text)
+	}
+	return out
+}
+
+func chunkMetaTexts(texts []string, limit int) (groups [][]string, ends []int) {
+	var cur []string
+	curLen := 0
+	flush := func(end int) {
+		if len(cur) > 0 {
+			groups = append(groups, cur)
+			ends = append(ends, end)
+			cur, curLen = nil, 0
+		}
+	}
+	for i, text := range texts {
+		for _, seg := range splitMetaText(text, limit) {
+			if len(cur) > 0 && curLen+len(seg)+1 > limit {
+				flush(i)
+			}
+			cur = append(cur, seg)
+			curLen += len(seg) + 1
+		}
+	}
+	flush(len(texts))
+	return groups, ends
+}
+
+func buildTurns(sysHead string, msgs []message, limit int) ([]turn, error) {
+	if len(msgs) == 0 {
+		return nil, nil
+	}
+	texts := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		texts = append(texts, formatMessage(m)+"\n")
+	}
+	// Everything through the last completed assistant exchange is history.
+	cut := 0
+	for i, m := range msgs {
+		if m.Role == "assistant" && len(m.ToolCalls) == 0 {
+			cut = i + 1
+		}
+	}
+	for i, m := range msgs {
+		if m.Role == "user" && i > cut {
+			for _, earlier := range msgs[:i] {
+				if earlier.Role == "user" {
+					cut = i
+					break
+				}
+			}
+		}
+	}
+	overhead := len(metaHistoryIntro) + len(metaHistoryEnd) + len(metaAckAsk)
+	pack := limit
+	if pack > 0 {
+		pack = limit - overhead
+		if pack < 1 {
+			pack = 1
+		}
+	}
+	var turns []turn
+	if cut > 0 {
+		groups, ends := chunkMetaTexts(texts[:cut], pack)
+		for gi, g := range groups {
+			var b strings.Builder
+			b.WriteString(metaHistoryIntro)
+			for _, seg := range g {
+				b.WriteString(seg + "\n")
+			}
+			b.WriteString(metaHistoryEnd + metaAckAsk)
+			turns = append(turns, turn{prompt: b.String(), replay: true, synced: ends[gi]})
+		}
+	}
+	current := texts[cut:]
+	if limit > 0 {
+		for _, text := range current {
+			if len(text)+1 > limit {
+				return nil, fmt.Errorf("one message is %d bytes, over the %d-byte per-turn budget. The bridge will not split a single message across submissions, because an interruption cannot be recovered. Nothing was sent and no tool was run; shorten the message or raise -max-chars", len(text), limit)
+			}
+		}
+	}
+	groups, ends := chunkMetaTexts(current, pack)
+	for i, g := range groups {
+		last := i == len(groups)-1
+		var b strings.Builder
+		if last {
+			b.WriteString(sysHead)
+		} else {
+			b.WriteString(metaHistoryIntro)
+		}
+		for _, seg := range g {
+			b.WriteString(seg + "\n")
+		}
+		if last {
+			turns = append(turns, turn{prompt: b.String()})
+		} else {
+			b.WriteString(metaHistoryEnd + metaAckAsk)
+			turns = append(turns, turn{prompt: b.String(), replay: true, synced: cut + ends[i]})
+		}
+	}
+	return turns, nil
+}
+
+func buildRecordTurns(msgs []message, limit int) []turn {
+	if len(msgs) == 0 {
+		return nil
+	}
+	texts := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		texts = append(texts, formatMessage(m)+"\n")
+	}
+	overhead := len(reseedRecordIntro) + len(reseedRecordEnd) + len(metaAckAsk)
+	pack := limit
+	if pack > 0 {
+		pack = limit - overhead
+		if pack < 1 {
+			pack = 1
+		}
+	}
+	groups, _ := chunkMetaTexts(texts, pack)
+	var turns []turn
+	for _, g := range groups {
+		var b strings.Builder
+		b.WriteString(reseedRecordIntro)
+		for _, seg := range g {
+			b.WriteString(seg + "\n")
+		}
+		b.WriteString(reseedRecordEnd + metaAckAsk)
+		turns = append(turns, turn{prompt: b.String(), replay: true})
+	}
+	return turns
+}
+
+func formatMessage(m message) string {
+	t := textOf(m)
+	if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+		raw, _ := json.Marshal(m.ToolCalls)
+		return fmt.Sprintf("[%s] %s (calls: %s)", m.Role, t, string(raw))
+	}
+	if m.Role == "tool" {
+		return fmt.Sprintf("[tool:%s] %s", m.ToolCallID, t)
+	}
+	return fmt.Sprintf("[%s] %s", m.Role, t)
+}
+
+func systemPrompt(tools []toolDef, choice string) string {
+	if len(tools) == 0 {
+		return ""
+	}
+	raw, _ := json.Marshal(tools)
+	return "You are a tool-using assistant. Available functions (JSON schemas):\n" + string(raw) +
+		"\ntool_choice: " + choice + "\n" +
+		"To call a function, reply with ONLY one or more <opencode_bridge_call>{\"name\":\"...\",\"arguments\":{...}}</opencode_bridge_call> wrappers and no other text. " +
+		"Otherwise reply in plain text."
+}
+
+func (h *handler) pasteLimit() int {
+	if h.maxPaste > 0 {
+		return h.maxPaste
+	}
+	if h.maxChars > 0 {
+		return h.maxChars
+	}
+	return 200000
+}
+
+func (h *handler) tryAdoptInterrupted(sid string, sess *session) bool {
+	if h.client == nil {
+		return false
+	}
+	if sess == nil || sess.URL == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	tr, err := h.client.ReadThreadTurn(ctx, sess.URL, sess.PendingPrompt)
+	if err != nil {
+		return false
+	}
+	if strings.TrimSpace(tr.Answer) == "" {
+		return false
+	}
+	// Adopt: record answer, clear pending.
+	h.mu.Lock()
+	sess.LastAnswer = tr.Answer
+	clearPendingBinding(sess)
+	h.saveLocked()
+	h.mu.Unlock()
+	log.Printf("[openai] session=%s adopted interrupted answer bytes=%d", shortSID(sid), len(tr.Answer))
+	return true
+}
+
+func (h *handler) sentDiagnosis(sid string, sess *session) string {
+	if sess == nil {
+		return "no session"
+	}
+	return fmt.Sprintf("pending=%v url=%v messages=%d", sess.Pending, sess.URL != "", len(sess.Messages))
+}
+
+func threadLabel(u string) string {
+	if u == "" {
+		return "none"
+	}
+	return "stored"
 }
 
 func (h *handler) abandonSessions(w http.ResponseWriter, r *http.Request) {
@@ -241,9 +857,55 @@ func (h *handler) abandonSessions(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusMethodNotAllowed, "invalid_request_error", "abandon requires POST")
 		return
 	}
+	// Operator-only state mutation: reject browser-originated requests.
+	if r.Header.Get("Origin") != "" {
+		h.writeError(w, http.StatusForbidden, "invalid_request_error", "browser-originated abandonment is forbidden")
+		return
+	}
+	id := h.sessionID(r)
+	if id == "" {
+		h.writeError(w, http.StatusBadRequest, "invalid_request_error", "session header required")
+		return
+	}
+	// Never run next to a browser turn.
+	select {
+	case <-h.gate:
+		defer func() { h.gate <- struct{}{} }()
+	case <-r.Context().Done():
+		h.writeError(w, http.StatusRequestTimeout, "timeout", "request canceled while queued")
+		return
+	default:
+		h.writeError(w, http.StatusServiceUnavailable, "server_error", "browser turn busy; retry when the adapter is idle")
+		return
+	}
+	h.mu.Lock()
+	s, ok := h.sessions[id]
+	outcome := "unknown"
+	cleared := false
+	if ok && s != nil {
+		if s.Pending {
+			clearPendingBinding(s)
+			cleared = true
+			outcome = "cleared"
+		} else {
+			outcome = "not_pending"
+		}
+	}
+	if cleared {
+		if err := h.saveLocked(); err != nil {
+			h.mu.Unlock()
+			h.writeError(w, http.StatusInternalServerError, "server_error", "session abandonment could not be persisted")
+			return
+		}
+	}
+	h.mu.Unlock()
+	log.Printf("[openai] abandon session=%s outcome=%s", shortSID(id), outcome)
 	w.Header().Set("Content-Type", "application/json")
-	log.Printf("[openai] abandon called")
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"session": id,
+		"outcome": outcome,
+		"cleared": cleared,
+	})
 }
 
 func (h *handler) recoverSession(w http.ResponseWriter, r *http.Request) {
@@ -252,31 +914,38 @@ func (h *handler) recoverSession(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusMethodNotAllowed, "invalid_request_error", "recover requires POST")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	id := h.sessionID(r)
 	if id == "" {
 		h.writeError(w, http.StatusBadRequest, "invalid_request_error", "session header required")
 		return
 	}
 	h.mu.Lock()
-	pending := h.sessions[id] != nil && h.sessions[id].Pending
+	sess, ok := h.sessions[id]
+	pending := ok && sess != nil && sess.Pending
 	h.mu.Unlock()
 	if !pending {
 		h.writeError(w, http.StatusConflict, "invalid_request_error", "no uncertain pending turn for this session")
 		return
 	}
-	calls, bytes := 0, 0
+	// Honest recovery: attempt bounded read-only adoption of the interrupted
+	// turn. Only report recovered when an answer was actually adopted.
+	adopted := h.tryAdoptInterrupted(id, sess)
+	if !adopted {
+		h.writeError(w, http.StatusConflict, "invalid_request_error", "recovery could not adopt a finished answer; pending turn remains uncertain")
+		return
+	}
 	h.mu.Lock()
+	bytes := 0
 	if s := h.sessions[id]; s != nil {
-		calls, bytes = 0, len(s.PendingPrompt)
+		bytes = len(s.LastAnswer)
 	}
 	h.mu.Unlock()
-	log.Printf("[openai] session=%s recover pending_prompt_bytes=%d", shortSID(id), bytes)
+	log.Printf("[openai] session=%s recover adopted answer_bytes=%d", shortSID(id), bytes)
+	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"recovered":         true,
-		"session":           id,
-		"cached_tool_calls": calls,
-		"response_bytes":    bytes,
+		"recovered":      true,
+		"session":        id,
+		"response_bytes": bytes,
 	})
 }
 
@@ -348,90 +1017,149 @@ func stateSummary(class string) string {
 	}
 }
 
-func (h *handler) writeError(w http.ResponseWriter, status int, code, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	log.Printf("[openai] refused status=%d code=%s msg=%.300s", status, code, msg)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error": map[string]any{"message": msg, "type": code, "code": code},
-	})
+// metaExtractCalls delegates to meta.ExtractExecutableCalls.
+func metaExtractCalls(answer string, schemas map[string]*jsonschema.Schema, choice string) ([]*meta.BridgeCall, error) {
+	return meta.ExtractExecutableCalls(answer, schemas, choice)
 }
 
-// toolSchemas converts OpenAI tool definitions into JSON Schema validators.
-func toolSchemas(tools []toolDef) (map[string]*jsonschema.Schema, error) {
-	out := map[string]*jsonschema.Schema{}
-	for _, t := range tools {
-		if t.Type != "" && t.Type != "function" {
-			continue
-		}
-		compiler := jsonschema.NewCompiler()
-		compiler.UseLoader(localSchemas{})
-		b, err := json.Marshal(t.Function.Parameters)
-		if err != nil {
-			return nil, err
-		}
-		var schema any
-		if len(b) == 0 || string(b) == "null" {
-			schema = map[string]any{"type": "object"}
-		} else if err = json.Unmarshal(b, &schema); err != nil {
-			return nil, err
-		}
-		if err = compiler.AddResource("https://proxy.local/tool.json", schema); err != nil {
-			return nil, err
-		}
-		s, err := compiler.Compile("https://proxy.local/tool.json")
-		if err != nil {
-			return nil, fmt.Errorf("tool %q schema: %w", t.Function.Name, err)
-		}
-		out[t.Function.Name] = s
-	}
-	return out, nil
+// completion wire types.
+type completionChoice struct {
+	Index        int     `json:"index"`
+	Message      message `json:"message"`
+	FinishReason string  `json:"finish_reason"`
+}
+type completion struct {
+	ID      string             `json:"id"`
+	Object  string             `json:"object"`
+	Created int64              `json:"created"`
+	Model   string             `json:"model"`
+	Choices []completionChoice `json:"choices"`
+	Usage   map[string]int     `json:"usage"`
 }
 
-type localSchemas struct{}
-
-func (localSchemas) Load(url string) (any, error) {
-	return nil, fmt.Errorf("external schema references disabled: %s", url)
+func (h *handler) buildCompletion(req *chatRequest, answer string, images []meta.ResponseImage, calls []*meta.BridgeCall, toolIDs []string, created int64, id string) *completion {
+	msg := message{Role: "assistant"}
+	finish := "stop"
+	if len(calls) > 0 {
+		for i, c := range calls {
+			rawArgs, _ := json.Marshal(c.Arguments)
+			tcID := fmt.Sprintf("call_meta_%d", i)
+			if i < len(toolIDs) && toolIDs[i] != "" {
+				tcID = toolIDs[i]
+			}
+			msg.ToolCalls = append(msg.ToolCalls, toolCall{
+				ID: tcID, Type: "function",
+				Function: callFunction{Name: c.Name, Arguments: string(rawArgs)},
+			})
+		}
+		finish = "tool_calls"
+	} else {
+		msg.Content = answer
+		if len(images) > 0 {
+			// keep simple: text only for meta in this batch
+			msg.Content = answer
+		}
+	}
+	if req != nil && req.Model != "" {
+		// keep model from handler
+	}
+	return &completion{ID: id, Object: "chat.completion", Created: created, Model: h.model,
+		Choices: []completionChoice{{Index: 0, Message: msg, FinishReason: finish}},
+		Usage:   map[string]int{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}
 }
 
-func effectiveToolChoice(raw any, nTools int) string {
-	if nTools == 0 {
-		return "none"
+func metaWireMessage(m message) map[string]any {
+	out := map[string]any{"role": m.Role}
+	if m.Content != nil {
+		out["content"] = m.Content
 	}
-	if raw == nil {
-		return "auto"
+	if len(m.ToolCalls) > 0 {
+		out["tool_calls"] = m.ToolCalls
 	}
-	switch v := raw.(type) {
-	case string:
-		return v
-	case map[string]any:
-		if fn, ok := v["function"].(map[string]any); ok {
-			if name, ok := fn["name"].(string); ok {
-				return name
+	if m.ToolCallID != "" {
+		out["tool_call_id"] = m.ToolCallID
+	}
+	if m.Name != "" {
+		out["name"] = m.Name
+	}
+	return out
+}
+
+func (h *handler) writeMetaChatResponse(w http.ResponseWriter, req *chatRequest, resp *completion, fid string) {
+	if req != nil && req.Stream {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		choice := resp.Choices[0]
+		meta := map[string]any{
+			"id": resp.ID, "object": "chat.completion.chunk", "created": resp.Created, "model": resp.Model,
+			"choices": []map[string]any{{"index": 0, "delta": map[string]any{"role": "assistant"}, "finish_reason": nil}},
+		}
+		writeSSE(w, meta)
+		if len(choice.Message.ToolCalls) > 0 {
+			for i, tc := range choice.Message.ToolCalls {
+				delta := map[string]any{
+					"id": resp.ID, "object": "chat.completion.chunk", "created": resp.Created, "model": resp.Model,
+					"choices": []map[string]any{{"index": 0, "delta": map[string]any{
+						"tool_calls": []map[string]any{{"index": i, "id": tc.ID, "type": "function",
+							"function": map[string]any{"name": tc.Function.Name, "arguments": tc.Function.Arguments}}},
+					}, "finish_reason": nil}},
+				}
+				writeSSE(w, delta)
+			}
+		} else {
+			texts := []string{}
+			if s, ok := choice.Message.Content.(string); ok && s != "" {
+				texts = append(texts, s)
+			}
+			for _, s := range texts {
+				delta := map[string]any{
+					"id": resp.ID, "object": "chat.completion.chunk", "created": resp.Created, "model": resp.Model,
+					"choices": []map[string]any{{"index": 0, "delta": map[string]any{"content": s}, "finish_reason": nil}},
+				}
+				writeSSE(w, delta)
 			}
 		}
-		return "auto"
-	default:
-		return "auto"
-	}
-}
-
-func shortSID(s string) string {
-	if len(s) > 8 {
-		return s[:8]
-	}
-	return s
-}
-
-func pendingSessionIDs(h *handler) []string {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	var ids []string
-	for id, s := range h.sessions {
-		if s != nil && s.Pending {
-			ids = append(ids, id)
+		done := map[string]any{
+			"id": resp.ID, "object": "chat.completion.chunk", "created": resp.Created, "model": resp.Model,
+			"choices": []map[string]any{{"index": 0, "delta": map[string]any{}, "finish_reason": choice.FinishReason}},
 		}
+		writeSSE(w, done)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+		if fl != nil {
+			fl.Flush()
+		}
+		return
 	}
-	sort.Strings(ids)
-	return ids
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func writeSSE(w http.ResponseWriter, v any) {
+	raw, _ := json.Marshal(v)
+	_, _ = w.Write([]byte("data: " + string(raw) + "\n\n"))
+	if fl, ok := w.(http.Flusher); ok {
+		fl.Flush()
+	}
+}
+
+func rebuildToolCalls(ids []string, calls []*meta.BridgeCall) []toolCall {
+	out := make([]toolCall, 0, len(calls))
+	for i, c := range calls {
+		id := ""
+		if i < len(ids) {
+			id = ids[i]
+		}
+		args, _ := json.Marshal(c.Arguments)
+		out = append(out, toolCall{
+			ID:   id,
+			Type: "function",
+			Function: callFunction{
+				Name:      c.Name,
+				Arguments: string(args),
+			},
+		})
+	}
+	return out
 }
