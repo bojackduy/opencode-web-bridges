@@ -5,6 +5,11 @@ when started. Updated 2026-10-30.
 
 ## Active
 
+- [ ] **Shared core mono-repo** (goal `shared-core-mono-repo`, running
+  on beam-free) — plan at docs/superpowers/plans/2026-10-31-shared-core.md:
+  absorb 3 submodules, extract bridgecore, migrate all 4 bridges. Owner
+  integrates per step.
+
 - [x] **meta.ai bridge** (HARDENED + REDEPLOYED 2026-10-31) — adapter on
   8791, Chrome on CDP 9224, `meta-web` registered. Streamed turn verified:
   role→content→finish_reason:stop→DONE, single submit, 14.6s. Retry-storm

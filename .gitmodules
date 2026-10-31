@@ -1,7 +1,3 @@
-[submodule "chatgpt-proxy"]
-	path = chatgpt-proxy
-	url = https://github.com/bojackduy/chatgpt-proxy.git
-	branch = main
 [submodule "gemini-proxy"]
 	path = gemini-proxy
 	url = https://github.com/bojackduy/gemini-proxy.git

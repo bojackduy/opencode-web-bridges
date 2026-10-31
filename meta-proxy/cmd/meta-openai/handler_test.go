@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bojackduy/bridgecore"
 	"github.com/bojackduy/meta-proxy/internal/meta"
 )
 
@@ -215,13 +216,13 @@ func TestComposerFillContract(t *testing.T) {
 }
 
 func TestPasteCapExcludesTeachingHead(t *testing.T) {
-	if got := pasteCap(200000, 300000, true); got != 200000 {
+	if got := bridgecore.PasteCap(200000, 300000, true); got != 200000 {
 		t.Fatalf("replay turns obey the raw budget: %d", got)
 	}
-	if got := pasteCap(200000, 300000, false); got != 500000 {
+	if got := bridgecore.PasteCap(200000, 300000, false); got != 500000 {
 		t.Fatalf("final turn allows budget plus fixed head: %d", got)
 	}
-	if got := pasteCap(200000, 0, false); got != 200000 {
+	if got := bridgecore.PasteCap(200000, 0, false); got != 200000 {
 		t.Fatalf("empty head changes nothing: %d", got)
 	}
 }
@@ -281,7 +282,7 @@ func TestLargeToolCatalogDoesNotCountAgainstPasteLimit(t *testing.T) {
 			t.Fatalf("tool blob must travel whole in exactly one turn, found in %d", whole)
 		}
 	}
-	if cap := pasteCap(200000, headBytes, last.replay); len(last.prompt) > cap {
+	if cap := bridgecore.PasteCap(200000, headBytes, last.replay); len(last.prompt) > cap {
 		t.Fatalf("final turn %d must fit budget-plus-head %d", len(last.prompt), cap)
 	}
 }

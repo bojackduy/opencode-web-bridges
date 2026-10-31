@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bojackduy/bridgecore"
 	"github.com/bojackduy/meta-proxy/internal/meta"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -515,7 +516,7 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	replays := make([]bool, len(allTurns))
 	for i, t := range allTurns {
 		sizes[i], replays[i] = len(t.prompt), t.replay
-		if len(t.prompt) > pasteCap(limit, teachBytes, t.replay) && limit > 0 {
+		if len(t.prompt) > bridgecore.PasteCap(limit, teachBytes, t.replay) && limit > 0 {
 			h.mu.Unlock()
 			h.writeError(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
 				fmt.Sprintf("turn %d/%d needs a %d-byte paste over the %d-byte single-paste limit. Nothing was sent and no tool was run.", i+1, len(allTurns), len(t.prompt), limit))
@@ -620,7 +621,7 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Protocol validation (strict, never weaken).
-	calls, verr := meta.ExtractExecutableCalls(answer, schemas, choice)
+	calls, verr := bridgecore.ExtractExecutableCalls(answer, schemas, choice)
 	if verr != nil {
 		h.mu.Lock()
 		h.saveLocked()
@@ -685,7 +686,7 @@ func importAbsorbed(answer string, schemas map[string]*jsonschema.Schema) (absor
 	if strings.Contains(got, "<opencode_bridge_call") || strings.Contains(got, "```") || strings.Contains(got, "~~~") {
 		return false, false
 	}
-	if rcalls, rerr := meta.ExtractExecutableCalls(answer, schemas, "auto"); rerr == nil && len(rcalls) == 0 {
+	if rcalls, rerr := bridgecore.ExtractExecutableCalls(answer, schemas, "auto"); rerr == nil && len(rcalls) == 0 {
 		return true, true
 	}
 	return false, false
@@ -702,47 +703,7 @@ const metaHistoryIntro = "HISTORY IMPORT\nThe following transcript history is be
 const metaHistoryEnd = "\nEND HISTORY IMPORT\n"
 const metaAckAsk = "Reply with only the single word: ACK. No tool calls.\n"
 
-func splitMetaText(text string, limit int) []string {
-	if limit <= 0 || len(text) <= limit {
-		return []string{text}
-	}
-	var out []string
-	for len(text) > limit {
-		cut := strings.LastIndex(text[:limit], "\n")
-		if cut <= 0 {
-			cut = limit
-		}
-		out = append(out, text[:cut])
-		text = text[cut:]
-	}
-	if text != "" {
-		out = append(out, text)
-	}
-	return out
-}
 
-func chunkMetaTexts(texts []string, limit int) (groups [][]string, ends []int) {
-	var cur []string
-	curLen := 0
-	flush := func(end int) {
-		if len(cur) > 0 {
-			groups = append(groups, cur)
-			ends = append(ends, end)
-			cur, curLen = nil, 0
-		}
-	}
-	for i, text := range texts {
-		for _, seg := range splitMetaText(text, limit) {
-			if len(cur) > 0 && curLen+len(seg)+1 > limit {
-				flush(i)
-			}
-			cur = append(cur, seg)
-			curLen += len(seg) + 1
-		}
-	}
-	flush(len(texts))
-	return groups, ends
-}
 
 func buildTurns(teach []string, msgs []message, limit int) ([]turn, error) {
 	if len(msgs) == 0 {
@@ -779,7 +740,7 @@ func buildTurns(teach []string, msgs []message, limit int) ([]turn, error) {
 	}
 	var turns []turn
 	if cut > 0 {
-		groups, ends := chunkMetaTexts(texts[:cut], pack)
+		groups, ends := bridgecore.ChunkTexts(texts[:cut], pack)
 		for gi, g := range groups {
 			var b strings.Builder
 			b.WriteString(metaHistoryIntro)
@@ -806,10 +767,10 @@ func buildTurns(teach []string, msgs []message, limit int) ([]turn, error) {
 			}
 		}
 	}
-	groups, ends := chunkMetaTexts(current, pack)
+	groups, ends := bridgecore.ChunkTexts(current, pack)
 	teachOnFinal := len(teach) > 0 && len(groups) == 1 && pack > 0 && teachBytes+groupBytes(groups[0]) <= pack
 	if len(teach) > 0 && !teachOnFinal {
-		tgroups, _ := chunkMetaTexts(teach, pack)
+		tgroups, _ := bridgecore.ChunkTexts(teach, pack)
 		for _, g := range tgroups {
 			var b strings.Builder
 			for _, seg := range g {
@@ -860,7 +821,7 @@ func buildRecordTurns(msgs []message, limit int) []turn {
 			pack = 1
 		}
 	}
-	groups, _ := chunkMetaTexts(texts, pack)
+	groups, _ := bridgecore.ChunkTexts(texts, pack)
 	var turns []turn
 	for _, g := range groups {
 		var b strings.Builder
@@ -924,16 +885,6 @@ func (h *handler) pasteLimit() int {
 	return 200000
 }
 
-// pasteCap is the effective ceiling for one turn: replay/import turns obey
-// the raw budget, while the answer-seeking turn additionally carries the
-// fixed teaching head (tool catalog), which is not changeable content and
-// must never count against the budget.
-func pasteCap(limit, headBytes int, replay bool) int {
-	if !replay {
-		return limit + headBytes
-	}
-	return limit
-}
 
 func (h *handler) tryAdoptInterrupted(sid string, sess *session) bool {
 	if h.client == nil {
@@ -1141,9 +1092,9 @@ func stateSummary(class string) string {
 	}
 }
 
-// metaExtractCalls delegates to meta.ExtractExecutableCalls.
-func metaExtractCalls(answer string, schemas map[string]*jsonschema.Schema, choice string) ([]*meta.BridgeCall, error) {
-	return meta.ExtractExecutableCalls(answer, schemas, choice)
+// metaExtractCalls delegates to bridgecore.ExtractExecutableCalls.
+func metaExtractCalls(answer string, schemas map[string]*jsonschema.Schema, choice string) ([]*bridgecore.BridgeCall, error) {
+	return bridgecore.ExtractExecutableCalls(answer, schemas, choice)
 }
 
 // completion wire types.
@@ -1161,7 +1112,7 @@ type completion struct {
 	Usage   map[string]int     `json:"usage"`
 }
 
-func (h *handler) buildCompletion(req *chatRequest, answer string, images []meta.ResponseImage, calls []*meta.BridgeCall, toolIDs []string, created int64, id string) *completion {
+func (h *handler) buildCompletion(req *chatRequest, answer string, images []meta.ResponseImage, calls []*bridgecore.BridgeCall, toolIDs []string, created int64, id string) *completion {
 	msg := message{Role: "assistant"}
 	finish := "stop"
 	if len(calls) > 0 {
@@ -1268,7 +1219,7 @@ func writeSSE(w http.ResponseWriter, v any) {
 	}
 }
 
-func rebuildToolCalls(ids []string, calls []*meta.BridgeCall) []toolCall {
+func rebuildToolCalls(ids []string, calls []*bridgecore.BridgeCall) []toolCall {
 	out := make([]toolCall, 0, len(calls))
 	for i, c := range calls {
 		id := ""

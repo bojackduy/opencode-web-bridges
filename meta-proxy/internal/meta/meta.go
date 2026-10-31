@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bojackduy/bridgecore"
 	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
@@ -759,7 +760,7 @@ func (c *Client) renderAnswer(ctx context.Context) (string, error) {
 	if err := chromedp.Run(ctx, chromedp.Evaluate(newestAnswerTextJS, &text)); err != nil {
 		return "", fmt.Errorf("meta: answer render failed: %v", err)
 	}
-	return answerToMarkdown(htmlFrag, text), nil
+	return bridgecore.AnswerToMarkdown(htmlFrag, text), nil
 }
 
 // ValidThreadURL is a validity check.
