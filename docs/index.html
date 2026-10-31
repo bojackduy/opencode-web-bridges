@@ -88,7 +88,6 @@
     .provider:nth-child(3) { translate: 0 146px; }
     .provider:nth-child(4) { translate: -146px 0; }
     .provider img { width: 30px; height: 30px; object-fit: contain; }
-    .provider-glyph { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: var(--white); font-size: 10px; font-weight: 800; }
     .provider span { font-size: 12px; font-weight: 800; }
     .orbit-caption { position: absolute; bottom: -4%; left: 50%; transform: translateX(-50%); white-space: nowrap; color: var(--muted); font: 12px var(--mono); }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -193,7 +192,6 @@
       .provider:nth-child(3) { translate: 0 120px; }
       .provider:nth-child(4) { translate: -120px 0; }
       .provider img { width: 25px; height: 25px; }
-      .provider-glyph { width: 25px; height: 25px; }
       .provider span { font-size: 10px; }
       .orbit-core { width: 90px; height: 90px; }
       .orbit-core img { width: 55px; height: 55px; }
@@ -250,8 +248,8 @@
         <div class="hero-art" aria-label="OpenCode connected to four web AI providers">
           <div class="orbit" aria-hidden="true">
             <div class="orbit-core"><img src="logo.png" alt=""></div>
-            <div class="provider-orbit"><div class="provider"><span class="provider-glyph" aria-hidden="true">AI</span><span>ChatGPT</span></div>
-            <div class="provider"><img src="https://cdn.simpleicons.org/google/4285F4" alt=""><span>Gemini</span></div>
+            <div class="provider-orbit"><div class="provider"><img src="icons/chatgpt.svg" alt=""><span>ChatGPT</span></div>
+            <div class="provider"><img src="icons/gemini.svg" alt=""><span>Gemini</span></div>
             <div class="provider"><img src="https://cdn.simpleicons.org/deepseek/4D6BFE" alt=""><span>DeepSeek</span></div>
             <div class="provider"><img src="https://cdn.simpleicons.org/meta/0866FF" alt=""><span>Meta AI</span></div></div>
             <div class="orbit-caption">one plugin · your existing sessions</div>
@@ -263,14 +261,14 @@
       <div class="marquee-track">
         <span class="marquee-item"><img src="https://cdn.simpleicons.org/opencode/191a17" alt="">OpenCode</span>
 
-        <span class="marquee-item"><span class="provider-glyph" aria-hidden="true">AI</span>ChatGPT</span>
-        <span class="marquee-item"><img src="https://cdn.simpleicons.org/google/4285F4" alt="">Gemini</span>
+        <span class="marquee-item"><img src="icons/chatgpt.svg" alt="">ChatGPT</span>
+        <span class="marquee-item"><img src="icons/gemini.svg" alt="">Gemini</span>
         <span class="marquee-item"><img src="https://cdn.simpleicons.org/deepseek/4D6BFE" alt="">DeepSeek</span>
         <span class="marquee-item"><img src="https://cdn.simpleicons.org/meta/0866FF" alt="">Meta AI</span>
         <span class="marquee-item"><img src="https://cdn.simpleicons.org/opencode/191a17" alt="">OpenCode</span>
 
-        <span class="marquee-item"><span class="provider-glyph" aria-hidden="true">AI</span>ChatGPT</span>
-        <span class="marquee-item"><img src="https://cdn.simpleicons.org/google/4285F4" alt="">Gemini</span>
+        <span class="marquee-item"><img src="icons/chatgpt.svg" alt="">ChatGPT</span>
+        <span class="marquee-item"><img src="icons/gemini.svg" alt="">Gemini</span>
         <span class="marquee-item"><img src="https://cdn.simpleicons.org/deepseek/4D6BFE" alt="">DeepSeek</span>
         <span class="marquee-item"><img src="https://cdn.simpleicons.org/meta/0866FF" alt="">Meta AI</span>
       </div>
@@ -288,13 +286,13 @@
           <div class="story-stage" aria-label="Illustration of the request flow">
             <div class="stage-top"><span>OpenCode Web Bridges</span><span class="stage-controls" aria-hidden="true"><i></i><i></i><i></i></span></div>
             <div class="stage-scene is-active" data-scene="0" aria-hidden="false">
-              <div class="flow-board"><div class="flow-node"><img src="logo.png" alt=""><strong>OpenCode</strong></div><div class="flow-arrow"></div><div class="flow-node"><img src="https://cdn.simpleicons.org/google/4285F4" alt=""><strong>Gemini Web</strong></div></div><div class="scene-label">select a web session</div>
+              <div class="flow-board"><div class="flow-node"><img src="logo.png" alt=""><strong>OpenCode</strong></div><div class="flow-arrow"></div><div class="flow-node"><img src="icons/gemini.svg" alt=""><strong>Gemini Web</strong></div></div><div class="scene-label">select a web session</div>
             </div>
             <div class="stage-scene" data-scene="1" aria-hidden="true">
               <div class="prompt-ui"><header><img src="logo.png" alt="">OpenCode coding session</header><div class="prompt-bubble">“Review this function and suggest a safer approach.”</div><div class="tool-line"><span class="tool-icon">⌘</span><div><strong>Tool flow stays in OpenCode</strong><small>Request routed through selected bridge</small></div></div></div><div class="scene-label">prompt leaves the workspace</div>
             </div>
             <div class="stage-scene" data-scene="2" aria-hidden="true">
-              <div class="browser-ui" data-ui><div class="browser-body"><div class="browser-title"><img src="https://cdn.simpleicons.org/google/4285F4" alt="">Gemini</div><div class="browser-answer">I found one edge case in the input handling. Here is a safer version… <i class="browser-cursor"></i></div></div></div><div class="scene-label">signed-in session returns the answer</div>
+              <div class="browser-ui" data-ui><div class="browser-body"><div class="browser-title"><img src="icons/gemini.svg" alt="">Gemini</div><div class="browser-answer">I found one edge case in the input handling. Here is a safer version… <i class="browser-cursor"></i></div></div></div><div class="scene-label">signed-in session returns the answer</div>
             </div>
             <div class="stage-scene" data-scene="3" aria-hidden="true">
               <div class="video-shell"><video id="demo-video" muted playsinline preload="metadata" poster="demo-gemini.png" controls aria-label="OpenCode and Gemini Web demo"><source src="demo-gemini.mp4" type="video/mp4"></video><div class="video-caption">OpenCode TUI ↔ Gemini Web · click to replay</div></div><div class="scene-label">real product capture</div>
