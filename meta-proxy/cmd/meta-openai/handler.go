@@ -425,6 +425,17 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		if meta.ValidThreadURL(sess.URL) {
 			fresh = false
 			seedMsgs = req.Messages[len(sess.Messages):]
+			// Teaching debt: the thread may have been minted by a tool-less
+			// turn (titling carries no tools), in which case the model never
+			// learned the wrapper protocol and every later turn runs
+			// untaught. Any tool-set change — including none-to-some —
+			// repays the full teaching once on this turn.
+			if len(req.Tools) > 0 && toolsFingerprint(req.Tools) != sess.ToolsFP {
+				if sys := systemPrompt(req.Tools, choice); sys != "" {
+					sysHead = sys + "\n\n"
+					log.Printf("[openai] session=%s teaching-debt repaid tools=%d", shortSID(sid), len(req.Tools))
+				}
+			}
 		} else {
 			log.Printf("[openai] session=%s delta-refused reason=missing-or-invalid-target incoming_messages=%d saved_messages=%d",
 				shortSID(sid), len(req.Messages), len(sess.Messages))

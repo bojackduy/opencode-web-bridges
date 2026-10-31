@@ -276,3 +276,22 @@ func TestImportAbsorbed(t *testing.T) {
 		}
 	}
 }
+
+func TestTeachingDebtTrigger(t *testing.T) {
+	// The re-teach gate repays full teaching exactly when the tool set
+	// differs from the recorded one — including none-to-some (a thread
+	// minted by a tool-less titling turn). Same set must not re-teach.
+	tools := []toolDef{{Type: "function", Function: toolFunction{Name: "shell"}}}
+	if toolsFingerprint(nil) == toolsFingerprint(tools) {
+		t.Fatal("empty tool set must fingerprint differently from a real one")
+	}
+	if toolsFingerprint(tools) != toolsFingerprint(tools) {
+		t.Fatal("identical tool sets must fingerprint equally")
+	}
+	if systemPrompt(tools, "auto") == "" {
+		t.Fatal("a real tool set must produce teaching")
+	}
+	if systemPrompt(nil, "auto") != "" {
+		t.Fatal("no tools must produce no teaching")
+	}
+}

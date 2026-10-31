@@ -412,13 +412,37 @@ func (c *Client) Ask(ctx context.Context, prompt string, newSession bool, timeou
 	defer rcancel()
 
 	if newSession {
+		// Fresh turns must PROVE a new thread before submitting: all
+		// sessions share one tab, and silently continuing on the previous
+		// thread cross-contaminates another session (observed: fresh test
+		// sessions adopting live user threads). A missing control or an
+		// unchanged URL fails closed — never submit blind.
+		var beforeURL string
+		_ = chromedp.Run(rctx, chromedp.Location(&beforeURL))
+		clicked := false
 		for _, sel := range newChatSelectors {
 			var found bool
 			if err := chromedp.Run(rctx, chromedp.Evaluate(fmt.Sprintf(`!!document.querySelector(%q)`, sel), &found)); err == nil && found {
 				_ = chromedp.Run(rctx, chromedp.Click(sel, chromedp.ByQuery))
-				time.Sleep(1 * time.Second)
+				clicked = true
 				break
 			}
+		}
+		if !clicked {
+			return "", fmt.Errorf("%w: new-chat control missing, refusing fresh submit into the previous thread", ErrNotSubmitted)
+		}
+		minted := false
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			var cur string
+			if err := chromedp.Run(rctx, chromedp.Location(&cur)); err == nil && cur != beforeURL && ValidThreadURL(cur) {
+				minted = true
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		if !minted {
+			return "", fmt.Errorf("%w: new chat did not open, refusing fresh submit into the previous thread", ErrNotSubmitted)
 		}
 	}
 
