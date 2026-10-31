@@ -5,10 +5,11 @@ when started. Updated 2026-10-30.
 
 ## Active
 
-- [ ] **Shared core mono-repo** (goal `shared-core-mono-repo` — CODE COMPLETE, deploying: 3 submodules
+- [x] **Shared core mono-repo** — DONE 2026-11-01: 3 submodules
   absorbed with history, bridgecore live (protocol/chunk/reseed/SSE/IDs/
-  markdown), all 4 bridges migrated, all suites green. Owner deploys
-  each adapter with live smoke.
+  markdown), all 4 bridges migrated, all suites green, all adapters
+  deployed with live smokes (deepseek/gemini/meta proven; chatgpt binary
+  live, turn blocked on Turnstile until human clears).
 
 - [x] **meta.ai bridge** (HARDENED + REDEPLOYED 2026-10-31) — adapter on
   8791, Chrome self-launched by the adapter on CDP 9224 (launchd job removed:
