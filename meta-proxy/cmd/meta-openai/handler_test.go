@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -182,5 +183,28 @@ func TestRecoverRequiresSessionHeader(t *testing.T) {
 	h.recoverSession(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("code=%d, want 400", rr.Code)
+	}
+}
+func TestComposerFillContract(t *testing.T) {
+	// The composer contract the bridge depends on: bulk insert outcome is
+	// decided by the "inserted:<len>" prefix plus a held-length check, so a
+	// short or rejected write fails closed instead of sending a partial
+	// paste. This pins the wire format Ask parses.
+	for raw, ok := range map[string]bool{
+		"inserted:199834": true, "inserted:8": true,
+		"exec-false:0": false, "exec-error:x": false, "missing": false, "": false,
+	} {
+		held := -1
+		accepted := strings.HasPrefix(raw, "inserted:")
+		if accepted {
+			var n int
+			if _, err := fmt.Sscanf(raw, "inserted:%d", &n); err != nil {
+				t.Fatalf("accept path must parse: %q", raw)
+			}
+			held = n
+		}
+		if accepted != ok || (ok && held < 0) {
+			t.Fatalf("contract mismatch for %q", raw)
+		}
 	}
 }

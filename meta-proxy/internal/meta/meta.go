@@ -424,18 +424,45 @@ func (c *Client) Ask(ctx context.Context, prompt string, newSession bool, timeou
 	before := c.answerSnapshot(rctx)
 	log.Printf("[meta] stage=submit prior_answers=%d", before.count)
 
-	typed := false
-	for _, sel := range composerSelectors {
-		var found bool
-		if err := chromedp.Run(rctx, chromedp.Evaluate(fmt.Sprintf(`!!document.querySelector(%q)`, sel), &found)); err == nil && found {
-			if err := chromedp.Run(rctx, chromedp.SendKeys(sel, prompt, chromedp.ByQuery)); err == nil {
-				typed = true
+	// Bulk insert, never keystroke typing: SendKeys types word-by-word and
+	// takes minutes on large pastes (observed). One focus +
+	// execCommand('insertText') writes the whole prompt in a single editor
+	// transaction; the held length is then verified before Send is touched.
+	// A short write fails closed — a partial paste must never be sent.
+	composer := ""
+	deadline := time.Now().Add(25 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, sel := range composerSelectors {
+			var found bool
+			if err := chromedp.Run(rctx, chromedp.Evaluate(fmt.Sprintf(`!!document.querySelector(%q)`, sel), &found)); err == nil && found {
+				composer = sel
 				break
 			}
 		}
+		if composer != "" {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
-	if !typed {
+	if composer == "" {
 		return "", ErrNoComposer
+	}
+	quoted, err := json.Marshal(prompt)
+	if err != nil {
+		return "", fmt.Errorf("%w: prompt encoding failed: %v", ErrNotSubmitted, err)
+	}
+	var filled string
+	fillJS := fmt.Sprintf(`(function(){var el=document.querySelector(%q); if(!el)return 'missing'; el.focus(); var ok=false; try{ok=document.execCommand('insertText',false,%s);}catch(e){return 'exec-error:'+e} var held=(el.innerText||''); return (ok?'inserted:':'exec-false:')+held.length;})()`, composer, string(quoted))
+	if err := chromedp.Run(rctx, chromedp.Evaluate(fillJS, &filled)); err != nil {
+		return "", fmt.Errorf("%w: composer fill failed: %v", ErrNotSubmitted, err)
+	}
+	log.Printf("[meta] stage=composer_insert result=%s prompt_bytes=%d", filled, len(prompt))
+	if !strings.HasPrefix(filled, "inserted:") {
+		return "", fmt.Errorf("%w: composer fill rejected (%s)", ErrNotSubmitted, filled)
+	}
+	var heldLen int
+	if _, err := fmt.Sscanf(filled, "inserted:%d", &heldLen); err != nil || heldLen < len(prompt) {
+		return "", fmt.Errorf("%w: short composer write held=%d want=%d", ErrNotSubmitted, heldLen, len(prompt))
 	}
 
 	sent := false
