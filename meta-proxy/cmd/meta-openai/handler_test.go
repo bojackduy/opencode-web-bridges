@@ -186,25 +186,29 @@ func TestRecoverRequiresSessionHeader(t *testing.T) {
 }
 func TestComposerFillContract(t *testing.T) {
 	// The composer contract the bridge depends on: select-all must report
-	// "selected:*", then the held length must cover the prompt, or the
-	// write fails closed instead of sending a partial paste. This pins the
-	// decision rule Ask applies.
-	accept := func(selRes string, heldLen, want int) bool {
-		return strings.HasPrefix(selRes, "selected:") && heldLen >= want
+	// "selected:*", then the held text must equal the prompt exactly or up
+	// to edge whitespace (Lexical normalizes edges on insert); anything
+	// else fails closed instead of sending a partial paste.
+	accept := func(selRes, held, prompt string) bool {
+		if !strings.HasPrefix(selRes, "selected:") {
+			return false
+		}
+		return held == prompt || strings.TrimSpace(held) == strings.TrimSpace(prompt)
 	}
 	for _, tc := range []struct {
-		selRes     string
-		held, want int
-		ok         bool
+		selRes       string
+		held, prompt string
+		ok           bool
 	}{
-		{"selected:867", 199834, 199834, true},
-		{"selected:0", 8, 8, true},
-		{"missing", 0, 8, false},
-		{"select-error:x", 0, 8, false},
-		{"selected:867", 100, 199834, false},
-		{"", 0, 0, false},
+		{"selected:867", "hello", "hello", true},
+		{"selected:867", "  hello\n\n", "hello", true},
+		{"missing", "hello", "hello", false},
+		{"select-error:x", "hello", "hello", false},
+		{"selected:867", "hell", "hello", false},
+		{"selected:867", "hello world", "hello", false},
+		{"", "", "", false},
 	} {
-		if got := accept(tc.selRes, tc.held, tc.want); got != tc.ok {
+		if got := accept(tc.selRes, tc.held, tc.prompt); got != tc.ok {
 			t.Fatalf("contract mismatch for %+v", tc)
 		}
 	}

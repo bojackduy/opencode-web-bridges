@@ -458,14 +458,23 @@ func (c *Client) Ask(ctx context.Context, prompt string, newSession bool, timeou
 	if err := chromedp.Run(rctx, input.InsertText(prompt)); err != nil {
 		return "", fmt.Errorf("%w: composer insert failed: %v", ErrNotSubmitted, err)
 	}
-	var heldLen int
-	if err := chromedp.Run(rctx, chromedp.Evaluate(fmt.Sprintf(`(document.querySelector(%q).innerText||'').length`, composer), &heldLen)); err != nil {
+	var held string
+	if err := chromedp.Run(rctx, chromedp.Evaluate(fmt.Sprintf(`(document.querySelector(%q).innerText||'')`, composer), &held)); err != nil {
 		return "", fmt.Errorf("%w: composer verify failed: %v", ErrNotSubmitted, err)
 	}
-	log.Printf("[meta] stage=composer_insert result=inserted held=%d prompt_bytes=%d", heldLen, len(prompt))
-	if heldLen < len(prompt) {
-		return "", fmt.Errorf("%w: short composer write held=%d want=%d", ErrNotSubmitted, heldLen, len(prompt))
+	// Lexical normalizes edge whitespace on insert (observed: consistent
+	// ~570B shortfall on 190KB+ pastes, all at the edges). Exact bytes win;
+	// edge-whitespace-only differences are the same words and safe to send.
+	// Anything else fails closed — a cut tail usually holds the question.
+	if held != prompt && strings.TrimSpace(held) != strings.TrimSpace(prompt) {
+		off := 0
+		for off < len(held) && off < len(prompt) && held[off] == prompt[off] {
+			off++
+		}
+		log.Printf("[meta] stage=composer_insert result=rejected held=%d want=%d diffoff=%d", len(held), len(prompt), off)
+		return "", fmt.Errorf("%w: short composer write held=%d want=%d diffoff=%d", ErrNotSubmitted, len(held), len(prompt), off)
 	}
+	log.Printf("[meta] stage=composer_insert result=inserted held=%d prompt_bytes=%d exact=%v", len(held), len(prompt), held == prompt)
 
 	sent := false
 	for _, sel := range sendSelectors {
