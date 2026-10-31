@@ -14,7 +14,8 @@ when started. Updated 2026-10-30.
   execCommand both wrong for this editor), -max-chars 500000 mirroring
   gemini (205KB tool catalog exceeds the 200KB default), pasteCap rule
   (fixed teaching head excluded from the budget — proven live with a
-  207KB catalog), redeployed.
+  207KB catalog), redeployed. Teaching destacks per-tool ahead of the
+  question (never split mid-tool) — proven live with the 207KB catalog.
 - [ ] **DeepSeek tool-call crash fix** (goal `deepseek-toolcrash-fix`,
   running) — reproduce on current build, fix at verified root, owner
   integrates (commit/push/deploy).
