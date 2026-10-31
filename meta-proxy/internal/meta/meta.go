@@ -825,6 +825,7 @@ var (
 		`button[type="submit"]`,
 	}
 	newChatSelectors = []string{
+		`a[href*="?new=1"]`, // verified live 2026-10-31: sidebar "New chat" link
 		`button[aria-label*="New chat"]`,
 		`a[aria-label*="New chat"]`,
 	}
