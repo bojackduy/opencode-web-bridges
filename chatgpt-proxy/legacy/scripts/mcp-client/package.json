@@ -1,0 +1,9 @@
+{
+  "name": "chatgpt-proxy-mcp-client",
+  "private": true,
+  "type": "module",
+  "description": "Debug client that talks to the chatgpt-proxy relay over MCP Streamable HTTP — same protocol ChatGPT Web uses",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  }
+}
