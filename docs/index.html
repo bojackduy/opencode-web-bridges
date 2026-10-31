@@ -3,18 +3,18 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>opencode-web-bridges — ChatGPT, Gemini &amp; DeepSeek OpenCode</title>
-  <meta name="description" content="Open-source OpenCode plugin: use your logged-in ChatGPT, Gemini and DeepSeek web sessions as models. No API key. Verified binaries. Fail-closed recovery." />
-  <meta name="keywords" content="opencode, chatgpt, gemini, deepseek, browser bridge, openai compatible, no api key, open source" />
+  <title>opencode-web-bridges — ChatGPT, Gemini, DeepSeek & Meta AI in OpenCode</title>
+  <meta name="description" content="Open-source OpenCode plugin: use your logged-in ChatGPT, Gemini, DeepSeek and Meta AI sessions as models. No API key. Verified binaries. Fail-closed recovery." />
+  <meta name="keywords" content="opencode, chatgpt, gemini, deepseek, meta ai, browser bridge, openai compatible, no api key, open source" />
   <link rel="canonical" href="https://bojackduy.github.io/opencode-web-bridges/" />
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="opencode-web-bridges — ChatGPT, Gemini &amp; DeepSeek OpenCode" />
-  <meta property="og:description" content="Open-source OpenCode plugin that registers your logged-in ChatGPT Web, Gemini Web and DeepSeek Web sessions as models. No API key." />
+  <meta property="og:title" content="opencode-web-bridges — ChatGPT, Gemini, DeepSeek & Meta AI in OpenCode" />
+  <meta property="og:description" content="Open-source OpenCode plugin that registers your logged-in ChatGPT, Gemini, DeepSeek and Meta AI sessions as models. No API key." />
   <meta property="og:image" content="https://bojackduy.github.io/opencode-web-bridges/og-image.png" />
   <meta property="og:url" content="https://bojackduy.github.io/opencode-web-bridges/" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="opencode-web-bridges — ChatGPT, Gemini &amp; DeepSeek OpenCode" />
-  <meta name="twitter:description" content="Open-source OpenCode plugin that registers your logged-in ChatGPT Web, Gemini Web and DeepSeek Web sessions as models. No API key." />
+  <meta name="twitter:title" content="opencode-web-bridges — ChatGPT, Gemini, DeepSeek & Meta AI in OpenCode" />
+  <meta name="twitter:description" content="Open-source OpenCode plugin that registers your logged-in ChatGPT, Gemini, DeepSeek and Meta AI sessions as models. No API key." />
   <meta name="twitter:image" content="https://bojackduy.github.io/opencode-web-bridges/og-image.png" />
   <link rel="icon" type="image/x-icon" href="favicon.ico" />
   <link rel="icon" type="image/png" sizes="32x32" href="favicon.png" />
@@ -23,6 +23,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
   <style>
+    /* hallmark stamp: v2.0.0 · landing page · opencode-web-bridges */
+    /* critique: no invented metrics, no eyebrow labels, no tracked caps */
     :root {
       --bg: #0F172A;
       --bg-soft: #1B2336;
@@ -34,11 +36,13 @@
       --accent-dim: #166534;
       --code-bg: #0A0F1C;
       --danger: #EF4444;
+      --font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; }
+    html, body { margin: 0; padding: 0; overflow-x: clip; }
     body {
-      font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: var(--font-body);
       background: var(--bg);
       color: var(--text);
       line-height: 1.6;
@@ -47,7 +51,7 @@
     }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
-    code, pre { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+    code, pre { font-family: var(--font-mono); }
     .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
     nav {
       position: sticky; top: 0; z-index: 10;
@@ -56,7 +60,7 @@
       border-bottom: 1px solid var(--border);
     }
     nav .inner { display: flex; align-items: center; justify-content: space-between; height: 56px; }
-    nav .brand { font-family: "JetBrains Mono", monospace; font-weight: 700; font-size: 15px; color: var(--text); letter-spacing: -0.01em; }
+    nav .brand { font-family: var(--font-mono); font-weight: 700; font-size: 15px; color: var(--text); letter-spacing: -0.01em; }
     nav .brand .dot { color: var(--accent); }
     nav .links { display: flex; gap: 22px; font-size: 14px; }
     nav .links a { color: var(--muted); }
@@ -73,8 +77,8 @@
     .btn-secondary { background: transparent; color: var(--text); border-color: var(--border); }
     .btn-secondary:hover { background: var(--bg-soft); text-decoration: none; }
     .hero { padding: 72px 0 56px; border-bottom: 1px solid var(--border); }
-    .hero .prompt { font-family: "JetBrains Mono", monospace; font-size: 13px; color: var(--accent); margin-bottom: 18px; }
-    .hero h1 { font-family: "JetBrains Mono", monospace; font-size: clamp(28px, 4.2vw, 46px); line-height: 1.15; margin: 0 0 16px; font-weight: 700; letter-spacing: -0.02em; }
+    .hero .prompt { font-family: var(--font-mono); font-size: 13px; color: var(--accent); margin-bottom: 18px; }
+    .hero h1 { font-family: var(--font-mono); font-size: clamp(28px, 4.2vw, 46px); line-height: 1.15; margin: 0 0 16px; font-weight: 700; letter-spacing: -0.02em; overflow-wrap: break-word; min-width: 0; }
     .hero p { font-size: 17px; color: var(--muted); max-width: 640px; margin: 0 0 24px; }
     .hero .cta { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 24px; }
     .install {
@@ -84,7 +88,7 @@
     }
     section { padding: 64px 0; border-bottom: 1px solid var(--border); }
     section:last-of-type { border-bottom: 0; }
-    section h2 { font-family: "JetBrains Mono", monospace; font-size: 22px; margin: 0 0 8px; font-weight: 700; }
+    section h2 { font-family: var(--font-mono); font-size: 22px; margin: 0 0 8px; font-weight: 700; }
     section .lead { color: var(--muted); font-size: 16px; max-width: 640px; margin: 0 0 32px; }
     .links-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
     .link-card {
@@ -94,7 +98,7 @@
     .link-card:hover { border-color: var(--accent); text-decoration: none; }
     .link-card h3 { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: var(--text); }
     .link-card p { margin: 0; color: var(--muted); font-size: 13px; }
-    .link-card .k { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--accent); margin-bottom: 6px; }
+    .link-card .k { font-family: var(--font-mono); font-size: 11px; color: var(--accent); margin-bottom: 6px; }
     .engines { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
     .engine { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 18px 20px; }
     .engine h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
@@ -103,13 +107,13 @@
     .engine p { margin: 0; color: var(--muted); font-size: 14px; }
     .steps { display: grid; gap: 14px; max-width: 720px; }
     .step { display: flex; gap: 14px; align-items: flex-start; }
-    .step .n { flex: 0 0 26px; height: 26px; border-radius: 4px; background: var(--accent-dim); color: var(--accent); display: flex; align-items: center; justify-content: center; font-family: "JetBrains Mono", monospace; font-size: 12px; font-weight: 700; }
+    .step .n { flex: 0 0 26px; height: 26px; border-radius: 4px; background: var(--accent-dim); color: var(--accent); display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 12px; font-weight: 700; }
     .step .body h4 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
     .step .body p { margin: 0; color: var(--muted); font-size: 14px; }
     .faq details { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; margin-bottom: 8px; }
     .faq summary { cursor: pointer; font-weight: 500; font-size: 15px; list-style: none; }
     .faq summary::-webkit-details-marker { display: none; }
-    .faq summary::before { content: "+ "; color: var(--accent); font-family: "JetBrains Mono", monospace; }
+    .faq summary::before { content: "+ "; color: var(--accent); font-family: var(--font-mono); }
     details[open] summary::before { content: "- "; }
     .faq details p { color: var(--muted); margin: 10px 0 0; font-size: 14px; }
     .support { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 8px; padding: 24px 28px; display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; }
@@ -146,7 +150,7 @@
   <header class="hero">
     <div class="container">
       <div class="prompt">$ cat README.md | head -3</div>
-      <h1>Use your logged-in ChatGPT, Gemini and DeepSeek sessions inside OpenCode.</h1>
+      <h1>Use your logged-in ChatGPT, Gemini, DeepSeek and Meta AI sessions inside OpenCode.</h1>
       <p>
         An open-source plugin that registers your browser-authenticated web sessions
         as OpenCode models. No API key, no per-token billing. Checksum-verified binaries
@@ -173,12 +177,17 @@
         <div class="engine">
           <h3>Gemini Web</h3>
           <div class="meta"><span>CDP</span><span>text-only</span><span>local build</span></div>
-          <p>Text-only browser engine. Build locally, no published release. Own tab, profile and CDP port.</p>
+          <p>Text-only browser engine. Build locally, no published release. Own tab, profile and CDP port. Batch support for large inputs.</p>
         </div>
         <div class="engine">
           <h3>DeepSeek Web</h3>
-          <div class="meta"><span>HTTP+SSE</span><span>no browser</span></div>
-          <p>Speaks the web API directly. No Chrome, no CDP. Needs a userToken from a signed-in session.</p>
+          <div class="meta"><span>HTTP+SSE</span><span>no browser</span><span>tool calls</span></div>
+          <p>Speaks the web API directly. No Chrome, no CDP. Needs a userToken from a signed-in session. Tool call fix for reliable extraction.</p>
+        </div>
+        <div class="engine">
+          <h3>Meta AI Web</h3>
+          <div class="meta"><span>CDP</span><span>meta bridge</span></div>
+          <p>Meta AI models via browser session. Dedicated Chrome profile on port 9224. No API key needed.</p>
         </div>
       </div>
     </div>
@@ -223,40 +232,6 @@
     </div>
   </section>
 
-  <section id="install">
-    <div class="container">
-      <h2>Install</h2>
-      <p class="lead">Prerequisites: Node.js 20+, OpenCode v1 or v2, Bun 1.1+, Chrome or Chromium.</p>
-      <div class="steps">
-        <div class="step">
-          <div class="n">1</div>
-          <div class="body">
-            <h3>Run the installer</h3>
-            <p><code class="kbd">$ npx @bojackduy/opencode-web-bridges install</code></p>
-          </div>
-        </div>
-        <div class="step">
-          <div class="n">2</div>
-          <div class="body">
-            <h3>Restart OpenCode</h3>
-            <p>Select <code>chatgpt-web/chatgpt-web</code> in /models.</p>
-          </div>
-        </div>
-        <div class="step">
-          <div class="n">3</div>
-          <div class="body">
-            <h3>Log in once</h3>
-            <p>Run <code>/chatgpt-login</code>, sign in to ChatGPT in the profile window, then <code>/chatgpt-status</code>.</p>
-          </div>
-        </div>
-      </div>
-      <div style="margin-top: 24px;">
-        <div class="install">$ npx @bojackduy/opencode-web-bridges install --host v2 --dry-run</div>
-        <p style="color: var(--muted); font-size: 13px; margin-top: 8px;">Dry-run previews exact config and required release assets without writing.</p>
-      </div>
-    </div>
-  </section>
-
   <section id="demo">
     <div class="container">
       <h2>Demo</h2>
@@ -292,6 +267,40 @@
           });
         })();
       </script>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="container">
+      <h2>Install</h2>
+      <p class="lead">Prerequisites: Node.js 20+, OpenCode v1 or v2, Bun 1.1+, Chrome or Chromium.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="n">1</div>
+          <div class="body">
+            <h3>Run the installer</h3>
+            <p><code class="kbd">$ npx @bojackduy/opencode-web-bridges install</code></p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="n">2</div>
+          <div class="body">
+            <h3>Restart OpenCode</h3>
+            <p>Select <code>chatgpt-web/chatgpt-web</code> in /models.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="n">3</div>
+          <div class="body">
+            <h3>Log in once</h3>
+            <p>Run <code>/chatgpt-login</code>, sign in to ChatGPT in the profile window, then <code>/chatgpt-status</code>.</p>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top: 24px;">
+        <div class="install">$ npx @bojackduy/opencode-web-bridges install --host v2 --dry-run</div>
+        <p style="color: var(--muted); font-size: 13px; margin-top: 8px;">Dry-run previews exact config and required release assets without writing.</p>
+      </div>
     </div>
   </section>
 
