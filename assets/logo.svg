@@ -5,7 +5,7 @@
       <stop offset="100%" stop-color="#FACC15"/>
     </linearGradient>
   </defs>
-  <rect width="512" height="512" rx="96" fill="#0F172A"/>
+  <rect width="512" height="512" rx="96" fill="#1E293B"/>
   <!-- two nodes -->
   <circle cx="128" cy="256" r="44" fill="url(#g)"/>
   <circle cx="384" cy="256" r="44" fill="url(#g)"/>

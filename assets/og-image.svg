@@ -6,10 +6,10 @@
     </linearGradient>
     <radialGradient id="glow" cx="0.85" cy="0.3" r="0.6">
       <stop offset="0%" stop-color="#EAB308" stop-opacity="0.2"/>
-      <stop offset="100%" stop-color="#0F172A" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#1E293B" stop-opacity="0"/>
     </radialGradient>
   </defs>
-  <rect width="1200" height="630" fill="#0F172A"/>
+  <rect width="1200" height="630" fill="#1E293B"/>
   <rect width="1200" height="630" fill="url(#glow)"/>
   <!-- bridge graphic right -->
   <g transform="translate(820,160)">
