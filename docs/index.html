@@ -26,15 +26,15 @@
     /* hallmark stamp: v2.0.0 · landing page · opencode-web-bridges */
     /* critique: no invented metrics, no eyebrow labels, no tracked caps */
     :root {
-      --bg: #1E293B;
-      --bg-soft: #334155;
-      --card: #334155;
-      --border: #475569;
-      --text: #F8FAFC;
-      --muted: #94A3B8;
+      --bg: #F8FAFC;
+      --bg-soft: #F1F5F9;
+      --card: #FFFFFF;
+      --border: #CBD5E1;
+      --text: #0F172A;
+      --muted: #475569;
       --accent: #EAB308;
       --accent-dim: #854D0E;
-      --code-bg: #1E293B;
+      --code-bg: #F1F5F9;
       --danger: #EF4444;
       --font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -55,7 +55,7 @@
     .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
     nav {
       position: sticky; top: 0; z-index: 10;
-      background: rgba(30,41,59,0.85);
+      background: rgba(248,250,252,0.85);
       backdrop-filter: blur(10px);
       border-bottom: 1px solid var(--border);
     }
@@ -83,7 +83,7 @@
     .hero .cta { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 24px; }
     .install {
       background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
-      padding: 12px 16px; font-size: 14px; color: var(--accent); overflow-x: auto;
+      padding: 12px 16px; font-size: 14px; color: #854D0E; overflow-x: auto;
       display: inline-block; max-width: 100%;
     }
     section { padding: 64px 0; border-bottom: 1px solid var(--border); }
@@ -93,14 +93,15 @@
     .links-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
     .link-card {
       background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px;
-      transition: border-color .15s ease;
+      transition: border-color .15s ease, transform .15s ease;
     }
-    .link-card:hover { border-color: var(--accent); text-decoration: none; }
+    .link-card:hover { border-color: var(--accent); text-decoration: none; transform: translateY(-2px); }
     .link-card h3 { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: var(--text); }
     .link-card p { margin: 0; color: var(--muted); font-size: 13px; }
     .link-card .k { font-family: var(--font-mono); font-size: 11px; color: var(--accent); margin-bottom: 6px; }
     .engines { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-    .engine { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 18px 20px; }
+    .engine { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 18px 20px; transition: border-color .15s ease, transform .15s ease; }
+    .engine:hover { border-color: var(--accent); transform: translateY(-2px); }
     .engine h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
     .engine .meta { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
     .engine .meta span { margin-right: 10px; }
@@ -123,13 +124,26 @@
     footer .inner { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
     footer a { color: var(--muted); }
     footer a:hover { color: var(--text); }
+    /* Scroll animations */
+    .reveal { opacity: 0; transform: translateY(30px); transition: opacity .6s ease, transform .6s ease; }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+    .reveal-left { opacity: 0; transform: translateX(-30px); transition: opacity .6s ease, transform .6s ease; }
+    .reveal-left.visible { opacity: 1; transform: translateX(0); }
+    .reveal-right { opacity: 0; transform: translateX(30px); transition: opacity .6s ease, transform .6s ease; }
+    .reveal-right.visible { opacity: 1; transform: translateX(0); }
+    .stagger > * { opacity: 0; transform: translateY(20px); transition: opacity .5s ease, transform .5s ease; }
+    .stagger.visible > *:nth-child(1) { transition-delay: .1s; opacity: 1; transform: translateY(0); }
+    .stagger.visible > *:nth-child(2) { transition-delay: .2s; opacity: 1; transform: translateY(0); }
+    .stagger.visible > *:nth-child(3) { transition-delay: .3s; opacity: 1; transform: translateY(0); }
+    .stagger.visible > *:nth-child(4) { transition-delay: .4s; opacity: 1; transform: translateY(0); }
+    .parallax-slow { will-change: transform; }
     @media (max-width: 640px) {
       nav .links { display: none; }
       .hero { padding: 48px 0 40px; }
       section { padding: 48px 0; }
     }
     @media (prefers-reduced-motion: reduce) {
-      * { transition: none !important; animation: none !important; }
+      * { transition: none !important; animation: none !important; transform: none !important; opacity: 1 !important; }
     }
   </style>
 </head>
@@ -166,25 +180,25 @@
 
   <section id="engines">
     <div class="container">
-      <h2>Engines</h2>
-      <p class="lead">All advertise tool calling. Pick the one whose subscription you already hold.</p>
-      <div class="engines">
-        <div class="engine">
+      <h2 class="reveal">Engines</h2>
+      <p class="lead reveal">All advertise tool calling. Pick the one whose subscription you already hold.</p>
+      <div class="engines stagger">
+        <div class="engine reveal">
           <h3>ChatGPT Web</h3>
           <div class="meta"><span>CDP</span><span>projects</span><span>recovery UX</span></div>
           <p>Full feature set: projects per session, thread reuse, media inputs. Needs Chrome and a dedicated profile.</p>
         </div>
-        <div class="engine">
+        <div class="engine reveal">
           <h3>Gemini Web</h3>
           <div class="meta"><span>CDP</span><span>text-only</span><span>local build</span></div>
           <p>Text-only browser engine. Build locally, no published release. Own tab, profile and CDP port. Batch support for large inputs.</p>
         </div>
-        <div class="engine">
+        <div class="engine reveal">
           <h3>DeepSeek Web</h3>
           <div class="meta"><span>HTTP+SSE</span><span>no browser</span><span>tool calls</span></div>
           <p>Speaks the web API directly. No Chrome, no CDP. Needs a userToken from a signed-in session. Tool call fix for reliable extraction.</p>
         </div>
-        <div class="engine">
+        <div class="engine reveal">
           <h3>Meta AI Web</h3>
           <div class="meta"><span>CDP</span><span>meta bridge</span></div>
           <p>Meta AI models via browser session. Dedicated Chrome profile on port 9224. No API key needed.</p>
@@ -195,35 +209,35 @@
 
   <section id="browse">
     <div class="container">
-      <h2>Browse the docs</h2>
-      <p class="lead">Jump to the section you need.</p>
-      <div class="links-grid">
-        <a class="link-card" href="https://github.com/bojackduy/opencode-web-bridges#install">
+      <h2 class="reveal">Browse the docs</h2>
+      <p class="lead reveal">Jump to the section you need.</p>
+      <div class="links-grid stagger">
+        <a class="link-card reveal" href="https://github.com/bojackduy/opencode-web-bridges#install">
           <div class="k">install</div>
           <h3>Installation</h3>
           <p>Prerequisites, one-line install, dry-run preview.</p>
         </a>
-        <a class="link-card" href="https://github.com/bojackduy/opencode-web-bridges#first-run-login">
+        <a class="link-card reveal" href="https://github.com/bojackduy/opencode-web-bridges#first-run-login">
           <div class="k">login</div>
           <h3>First-run login</h3>
           <p>Chrome profile, one-time sign-in, status check.</p>
         </a>
-        <a class="link-card" href="https://github.com/bojackduy/opencode-web-bridges/blob/main/docs/BRIDGE_LOGS.md">
+        <a class="link-card reveal" href="https://github.com/bojackduy/opencode-web-bridges/blob/main/docs/BRIDGE_LOGS.md">
           <div class="k">logs</div>
           <h3>Bridge logs</h3>
           <p>Stages, flow-id timeline, what each stopped stage means.</p>
         </a>
-        <a class="link-card" href="https://github.com/bojackduy/opencode-web-bridges#troubleshooting">
+        <a class="link-card reveal" href="https://github.com/bojackduy/opencode-web-bridges#troubleshooting">
           <div class="k">help</div>
           <h3>Troubleshooting</h3>
           <p>Common symptoms and fixes.</p>
         </a>
-        <a class="link-card" href="https://github.com/bojackduy/opencode-web-bridges/blob/main/docs/POSITIONING.md">
+        <a class="link-card reveal" href="https://github.com/bojackduy/opencode-web-bridges/blob/main/docs/POSITIONING.md">
           <div class="k">product</div>
           <h3>Positioning</h3>
           <p>What it is, who it serves, why it exists.</p>
         </a>
-        <a class="link-card" href="https://github.com/bojackduy/opencode-web-bridges/blob/main/LICENSE">
+        <a class="link-card reveal" href="https://github.com/bojackduy/opencode-web-bridges/blob/main/LICENSE">
           <div class="k">license</div>
           <h3>AGPL-3.0</h3>
           <p>Full license text.</p>
@@ -234,9 +248,9 @@
 
   <section id="demo">
     <div class="container">
-      <h2>Demo</h2>
-      <p class="lead">A real run: OpenCode sends a prompt, the bridge drives your logged-in Gemini tab, and the reply comes back. No API key.</p>
-      <figure style="margin: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg);">
+      <h2 class="reveal">Demo</h2>
+      <p class="lead reveal">A real run: OpenCode sends a prompt, the bridge drives your logged-in Gemini tab, and the reply comes back. No API key.</p>
+      <figure class="reveal" style="margin: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code-bg);">
         <video id="demo-video" muted playsinline preload="metadata" poster="demo-gemini.png" style="display: block; width: 100%; height: auto; cursor: pointer;">
           <source src="demo-gemini.mp4" type="video/mp4" />
           <source src="demo-gemini.gif" type="image/gif" />
@@ -272,32 +286,32 @@
 
   <section id="install">
     <div class="container">
-      <h2>Install</h2>
-      <p class="lead">Prerequisites: Node.js 20+, OpenCode v1 or v2, Bun 1.1+, Chrome or Chromium.</p>
-      <div class="steps">
-        <div class="step">
+      <h2 class="reveal">Install</h2>
+      <p class="lead reveal">Prerequisites: Node.js 20+, OpenCode v1 or v2, Bun 1.1+, Chrome or Chromium.</p>
+      <div class="steps stagger">
+        <div class="step reveal">
           <div class="n">1</div>
           <div class="body">
-            <h3>Run the installer</h3>
+            <h4>Run the installer</h4>
             <p><code class="kbd">$ npx @bojackduy/opencode-web-bridges install</code></p>
           </div>
         </div>
-        <div class="step">
+        <div class="step reveal">
           <div class="n">2</div>
           <div class="body">
-            <h3>Restart OpenCode</h3>
+            <h4>Restart OpenCode</h4>
             <p>Select <code>chatgpt-web/chatgpt-web</code> in /models.</p>
           </div>
         </div>
-        <div class="step">
+        <div class="step reveal">
           <div class="n">3</div>
           <div class="body">
-            <h3>Log in once</h3>
+            <h4>Log in once</h4>
             <p>Run <code>/chatgpt-login</code>, sign in to ChatGPT in the profile window, then <code>/chatgpt-status</code>.</p>
           </div>
         </div>
       </div>
-      <div style="margin-top: 24px;">
+      <div style="margin-top: 24px;" class="reveal">
         <div class="install">$ npx @bojackduy/opencode-web-bridges install --host v2 --dry-run</div>
         <p style="color: var(--muted); font-size: 13px; margin-top: 8px;">Dry-run previews exact config and required release assets without writing.</p>
       </div>
@@ -306,25 +320,25 @@
 
   <section id="faq">
     <div class="container">
-      <h2>FAQ</h2>
+      <h2 class="reveal">FAQ</h2>
       <div class="faq">
-        <details>
+        <details class="reveal">
           <summary>Does this bypass ChatGPT, Gemini or DeepSeek limits?</summary>
           <p>No. It uses your own logged-in session, subject to your account's access and usage limits and terms of service.</p>
         </details>
-        <details>
+        <details class="reveal">
           <summary>Where do my credentials and prompts go?</summary>
           <p>Nowhere third-party. The bridge runs on 127.0.0.1 and drives your own Chrome profile. Logs are content-free: sizes, counts and reason codes only.</p>
         </details>
-        <details>
+        <details class="reveal">
           <summary>What happens if a turn is interrupted?</summary>
           <p>Recovery reads the remote transcript back. Nothing is re-submitted. Fail-closed on uncertainty, so a dropped request can never double-spend a prompt.</p>
         </details>
-        <details>
+        <details class="reveal">
           <summary>Does it work with OpenCode v1 and v2?</summary>
           <p>Yes. One package covers both hosts via a server hook (v1) or setup domains (v2).</p>
         </details>
-        <details>
+        <details class="reveal">
           <summary>Is it free?</summary>
           <p>Yes, open source under AGPL-3.0. You still need your own ChatGPT Plus/Pro, Gemini or DeepSeek subscription.</p>
         </details>
@@ -334,7 +348,7 @@
 
   <section>
     <div class="container">
-      <div class="support">
+      <div class="support reveal">
         <div>
           <h3>Need help or found a bug?</h3>
           <p>Open an issue on GitHub. Include the adapter log stage and reason code.</p>
@@ -356,5 +370,33 @@
       </div>
     </div>
   </footer>
+
+  <script>
+    // Scroll-triggered reveal animations
+    (function () {
+      var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+          }
+        });
+      }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+      document.querySelectorAll('.reveal').forEach(function (el) {
+        observer.observe(el);
+      });
+      // Stagger containers
+      document.querySelectorAll('.stagger').forEach(function (el) {
+        observer.observe(el);
+      });
+      // Parallax on hero
+      var hero = document.querySelector('.hero');
+      if (hero) {
+        window.addEventListener('scroll', function () {
+          var scrolled = window.scrollY;
+          hero.style.transform = 'translateY(' + (scrolled * 0.3) + 'px)';
+        }, { passive: true });
+      }
+    })();
+  </script>
 </body>
 </html>
