@@ -43,11 +43,11 @@ type message struct {
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 type chatRequest struct {
-	Model       string    `json:"model"`
-	Messages    []message `json:"messages"`
-	Tools       []toolDef `json:"tools,omitempty"`
-	ToolChoice  any       `json:"tool_choice,omitempty"`
-	Stream      bool      `json:"stream,omitempty"`
+	Model      string    `json:"model"`
+	Messages   []message `json:"messages"`
+	Tools      []toolDef `json:"tools,omitempty"`
+	ToolChoice any       `json:"tool_choice,omitempty"`
+	Stream     bool      `json:"stream,omitempty"`
 }
 
 // session mirrors gemini's session with full recovery fields.
@@ -59,16 +59,16 @@ type session struct {
 	PendingChoice   any       `json:"pending_choice,omitempty"`
 	PendingReqHash  string    `json:"pending_req_hash,omitempty"`
 
-	Messages     []message `json:"messages"`
-	LastAnswer   string    `json:"last_answer,omitempty"`
-	LastReqHash  string    `json:"last_req_hash,omitempty"`
-	LastRespID   string    `json:"last_resp_id,omitempty"`
-	LastCreated  int64     `json:"last_created,omitempty"`
-	LastToolIDs  []string  `json:"last_tool_ids,omitempty"`
-	URL          string    `json:"url,omitempty"`
-	ToolsFP      string    `json:"tools_fp,omitempty"`
-	ReseedFrom   string    `json:"reseed_from,omitempty"`
-	ReseedEvidence string  `json:"reseed_evidence,omitempty"`
+	Messages       []message `json:"messages"`
+	LastAnswer     string    `json:"last_answer,omitempty"`
+	LastReqHash    string    `json:"last_req_hash,omitempty"`
+	LastRespID     string    `json:"last_resp_id,omitempty"`
+	LastCreated    int64     `json:"last_created,omitempty"`
+	LastToolIDs    []string  `json:"last_tool_ids,omitempty"`
+	URL            string    `json:"url,omitempty"`
+	ToolsFP        string    `json:"tools_fp,omitempty"`
+	ReseedFrom     string    `json:"reseed_from,omitempty"`
+	ReseedEvidence string    `json:"reseed_evidence,omitempty"`
 }
 
 type browserClient interface {
@@ -486,12 +486,17 @@ func (h *handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		seedBase = len(sess.Messages)
 	}
 
-	// Paste ceiling check before journaling.
+	// Paste ceiling check before journaling. The fixed teaching head is not
+	// changeable content: the budget binds what we choose to paste (history
+	// slices, record), never the tool catalog we must teach on a fresh
+	// thread. A huge catalog therefore chunks around the teaching instead
+	// of refusing it; the insert verifier still fails closed on short
+	// writes, so an oversized paste errors honestly instead of corrupting.
 	sizes := make([]int, len(allTurns))
 	replays := make([]bool, len(allTurns))
 	for i, t := range allTurns {
 		sizes[i], replays[i] = len(t.prompt), t.replay
-		if len(t.prompt) > limit && limit > 0 {
+		if len(t.prompt) > pasteCap(limit, sysHead, t.replay) && limit > 0 {
 			h.mu.Unlock()
 			h.writeError(w, http.StatusRequestEntityTooLarge, "invalid_request_error",
 				fmt.Sprintf("turn %d/%d needs a %d-byte paste over the %d-byte single-paste limit. Nothing was sent and no tool was run.", i+1, len(allTurns), len(t.prompt), limit))
@@ -809,6 +814,17 @@ func (h *handler) pasteLimit() int {
 		return h.maxChars
 	}
 	return 200000
+}
+
+// pasteCap is the effective ceiling for one turn: replay/import turns obey
+// the raw budget, while the answer-seeking turn additionally carries the
+// fixed teaching head (tool catalog), which is not changeable content and
+// must never count against the budget.
+func pasteCap(limit int, sysHead string, replay bool) int {
+	if !replay {
+		return limit + len(sysHead)
+	}
+	return limit
 }
 
 func (h *handler) tryAdoptInterrupted(sid string, sess *session) bool {

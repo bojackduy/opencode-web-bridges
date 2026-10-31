@@ -209,3 +209,36 @@ func TestComposerFillContract(t *testing.T) {
 		}
 	}
 }
+
+func TestPasteCapExcludesTeachingHead(t *testing.T) {
+	head := strings.Repeat("H", 300000)
+	if got := pasteCap(200000, head, true); got != 200000 {
+		t.Fatalf("replay turns obey the raw budget: %d", got)
+	}
+	if got := pasteCap(200000, head, false); got != 500000 {
+		t.Fatalf("final turn allows budget plus fixed head: %d", got)
+	}
+	if got := pasteCap(200000, "", false); got != 200000 {
+		t.Fatalf("empty head changes nothing: %d", got)
+	}
+}
+
+func TestLargeToolCatalogDoesNotCountAgainstPasteLimit(t *testing.T) {
+	big := strings.Repeat("x", 300000)
+	tools := []toolDef{{Type: "function", Function: toolFunction{Name: "big", Parameters: map[string]any{"blob": big}}}}
+	head := systemPrompt(tools, "auto")
+	if len(head) <= 200000 {
+		t.Fatalf("test needs an over-budget head, got %d", len(head))
+	}
+	msgs := []message{{Role: "user", Content: "hi"}}
+	turns, err := buildTurns(head, msgs, 200000)
+	if err != nil {
+		t.Fatalf("buildTurns must not refuse: %v", err)
+	}
+	if len(turns) != 1 || turns[0].replay {
+		t.Fatalf("tiny message plus catalog must be one final turn: %+v", turns)
+	}
+	if cap := pasteCap(200000, head, turns[0].replay); len(turns[0].prompt) > cap {
+		t.Fatalf("final turn %d must fit budget-plus-head %d", len(turns[0].prompt), cap)
+	}
+}
