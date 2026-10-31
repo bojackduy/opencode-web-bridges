@@ -101,10 +101,10 @@
       padding: 12px 16px; font-size: 14px; color: #854D0E; overflow-x: auto;
       display: inline-block; max-width: 100%;
     }
-    /* Sticky scrollytelling */
+    /* Sticky scrollytelling section */
     .scrolly {
       position: relative;
-      min-height: 300vh;
+      min-height: 400vh;
     }
     .scrolly-sticky {
       position: sticky;
@@ -114,27 +114,28 @@
       align-items: center;
       justify-content: center;
       overflow: hidden;
+      background: var(--bg);
     }
-    .scrolly-content {
+    .scrolly-frame {
+      width: 100%;
+      max-width: 960px;
+      padding: 40px;
       position: absolute;
       inset: 0;
       display: flex;
       align-items: center;
       justify-content: center;
       opacity: 0;
-      transform: translateY(40px);
-      transition: opacity .6s ease, transform .6s ease;
-      pointer-events: none;
+      transform: scale(0.95) translateY(20px);
+      transition: opacity .5s ease, transform .5s ease;
     }
-    .scrolly-content.active {
+    .scrolly-frame.active {
       opacity: 1;
-      transform: translateY(0);
-      pointer-events: auto;
+      transform: scale(1) translateY(0);
     }
-    .scrolly-content .frame {
+    .scrolly-frame .frame-inner {
       width: 100%;
-      max-width: 900px;
-      padding: 40px;
+      max-width: 800px;
     }
     /* Scroll progress indicator */
     .scroll-progress { position: fixed; top: 56px; left: 0; height: 3px; background: var(--accent); z-index: 11; width: 0%; transition: width .1s linear; }
@@ -162,6 +163,29 @@
     .stagger.visible > *:nth-child(6) { transition-delay: .55s; }
     .slide-in { opacity: 0; transform: translateX(100px); transition: opacity .8s cubic-bezier(.16,1,.3,1), transform .8s cubic-bezier(.16,1,.3,1); }
     .slide-in.visible { opacity: 1; transform: translateX(0); }
+    /* Visual components for scrollytelling */
+    .scrolly-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 24px; margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    .scrolly-card h3 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+    .scrolly-card p { margin: 0; color: var(--muted); font-size: 14px; }
+    .scrolly-card .icon {
+      width: 40px; height: 40px; border-radius: 8px;
+      background: var(--accent-dim); color: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-mono); font-size: 18px; font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .scrolly-progress {
+      display: flex; gap: 8px; margin-bottom: 24px;
+    }
+    .scrolly-progress .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--border); transition: background .3s ease, transform .3s ease;
+    }
+    .scrolly-progress .dot.active { background: var(--accent); transform: scale(1.3); }
     .links-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
     .link-card {
       background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px;
@@ -196,7 +220,6 @@
     footer .inner { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
     footer a { color: var(--muted); }
     footer a:hover { color: var(--text); }
-    /* Scroll progress indicator */
     .scroll-progress { position: fixed; top: 56px; left: 0; height: 3px; background: var(--accent); z-index: 11; width: 0%; transition: width .1s linear; }
     @media (max-width: 640px) {
       nav .links { display: none; }
@@ -204,12 +227,80 @@
       section { padding: 48px 0; }
       .scrolly-sticky { position: static; height: auto; }
       .scrolly { min-height: auto; }
+      .scrolly-frame { position: static; opacity: 1; transform: none; }
     }
     @media (prefers-reduced-motion: reduce) {
       * { transition: none !important; animation: none !important; transform: none !important; opacity: 1 !important; }
       .reveal, .reveal-left, .reveal-right, .reveal-scale { opacity: 1; transform: none; }
       .stagger > * { opacity: 1; transform: none; }
-      .scrolly-content { opacity: 1; transform: none; position: static; }
+      .scrolly-frame { opacity: 1; transform: none; position: static; }
+    }
+
+    /* Circular orbit animations */
+    .orbit-container {
+      position: relative; width: 300px; height: 300px; margin: 0 auto;
+    }
+    .orbit-center {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 80px; height: 80px; border-radius: 50%;
+      background: var(--accent); color: #0F172A;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+      z-index: 2;
+    }
+    .orbit-item {
+      position: absolute; top: 50%; left: 50%;
+      width: 60px; height: 60px; border-radius: 50%;
+      background: var(--card); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-mono); font-size: 10px; font-weight: 600; color: var(--text);
+      transform-origin: 0 0;
+      transition: transform .3s ease;
+    }
+    .orbit-item:hover { border-color: var(--accent); }
+    .orbit-ring {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 220px; height: 220px; border-radius: 50%;
+      border: 1px dashed var(--border);
+    }
+    /* Rotating text on scroll */
+    .rotate-on-scroll { will-change: transform; }
+    /* Circular reveal */
+    .circle-reveal {
+      clip-path: circle(0% at 50% 50%);
+      transition: clip-path .8s cubic-bezier(.16,1,.3,1);
+    }
+    .circle-reveal.visible { clip-path: circle(75% at 50% 50%); }
+    /* Spinning accent */
+    .spin-accent {
+      display: inline-block; animation: spin 8s linear infinite;
+    }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    /* Orbit animation on scroll */
+    .orbit-animate { animation: orbit 20s linear infinite; }
+    @keyframes orbit { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    /* Circular progress */
+    .circle-progress {
+      width: 80px; height: 80px; border-radius: 50%;
+      background: conic-gradient(var(--accent) 0deg, var(--border) 0deg);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .circle-progress::before {
+      content: ''; position: absolute; width: 60px; height: 60px;
+      border-radius: 50%; background: var(--bg);
+    }
+    /* Pulsing ring */
+    .pulse-ring {
+      position: relative;
+    }
+    .pulse-ring::after {
+      content: ''; position: absolute; inset: -4px;
+      border-radius: 50%; border: 2px solid var(--accent);
+      animation: pulse 2s ease-out infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1; }
+      100% { transform: scale(1.5); opacity: 0; }
     }
   </style>
 </head>
@@ -248,41 +339,63 @@
     </div>
   </header>
 
-  <!-- Sticky scrollytelling section -->
+  <!-- Sticky scrollytelling section with visual components -->
   <div class="scrolly" id="engines">
     <div class="scrolly-sticky">
       <div class="container">
-        <h2 class="reveal">Engines</h2>
-        <p class="lead reveal">All advertise tool calling. Pick the one whose subscription you already hold.</p>
-      </div>
-    </div>
-    <div class="scrolly-content active">
-      <div class="container">
-        <div class="engines stagger">
-          <div class="engine reveal scroll-scale">
-            <h3>ChatGPT Web</h3>
-            <div class="meta"><span>CDP</span><span>projects</span><span>recovery UX</span></div>
-            <p>Full feature set: projects per session, thread reuse, media inputs. Needs Chrome and a dedicated profile.</p>
+        <div class="scrolly-progress" id="scrolly-progress">
+          <div class="dot active"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+          <div class="dot"></div>
+        </div>
+        <div class="scrolly-frame active" data-frame="0">
+          <div class="frame-inner">
+            <h2>Four engines, one plugin</h2>
+            <p class="lead">Pick the one whose subscription you already hold.</p>
+            <div class="scrolly-card">
+              <div class="icon">1</div>
+              <h3>ChatGPT Web</h3>
+              <p>Full feature set: projects per session, thread reuse, media inputs. Needs Chrome and a dedicated profile.</p>
+            </div>
           </div>
-          <div class="engine reveal scroll-scale">
-            <h3>Gemini Web</h3>
-            <div class="meta"><span>CDP</span><span>text-only</span><span>local build</span></div>
-            <p>Text-only browser engine. Build locally, no published release. Own tab, profile and CDP port. Batch support for large inputs.</p>
+        </div>
+        <div class="scrolly-frame" data-frame="1">
+          <div class="frame-inner">
+            <h2>Four engines, one plugin</h2>
+            <p class="lead">Pick the one whose subscription you already hold.</p>
+            <div class="scrolly-card">
+              <div class="icon">2</div>
+              <h3>Gemini Web</h3>
+              <p>Text-only browser engine. Build locally, no published release. Own tab, profile and CDP port. Batch support for large inputs.</p>
+            </div>
           </div>
-          <div class="engine reveal scroll-scale">
-            <h3>DeepSeek Web</h3>
-            <div class="meta"><span>HTTP+SSE</span><span>no browser</span><span>tool calls</span></div>
-            <p>Speaks the web API directly. No Chrome, no CDP. Needs a userToken from a signed-in session. Tool call fix for reliable extraction.</p>
+        </div>
+        <div class="scrolly-frame" data-frame="2">
+          <div class="frame-inner">
+            <h2>Four engines, one plugin</h2>
+            <p class="lead">Pick the one whose subscription you already hold.</p>
+            <div class="scrolly-card">
+              <div class="icon">3</div>
+              <h3>DeepSeek Web</h3>
+              <p>Speaks the web API directly. No Chrome, no CDP. Needs a userToken from a signed-in session. Tool call fix for reliable extraction.</p>
+            </div>
           </div>
-          <div class="engine reveal scroll-scale">
-            <h3>Meta AI Web</h3>
-            <div class="meta"><span>CDP</span><span>meta bridge</span></div>
-            <p>Meta AI models via browser session. Dedicated Chrome profile on port 9224. No API key needed.</p>
+        </div>
+        <div class="scrolly-frame" data-frame="3">
+          <div class="frame-inner">
+            <h2>Four engines, one plugin</h2>
+            <p class="lead">Pick the one whose subscription you already hold.</p>
+            <div class="scrolly-card">
+              <div class="icon">4</div>
+              <h3>Meta AI Web</h3>
+              <p>Meta AI models via browser session. Dedicated Chrome profile on port 9224. No API key needed.</p>
+            </div>
           </div>
         </div>
       </div>
     </div>
-  </div>
+  </section>
 
   <section id="browse">
     <div class="container">
@@ -451,7 +564,7 @@
   </footer>
 
   <script>
-    // Scroll-driven animations: parallax, reveal, stagger, progress bar
+    // Scroll-driven animations: parallax, reveal, stagger, progress bar, scrollytelling
     (function () {
       // Scroll progress bar
       var progressBar = document.getElementById('scroll-progress');
@@ -471,7 +584,24 @@
         window.addEventListener('scroll', function () {
           var scrolled = window.scrollY;
           if (heroBg) heroBg.style.transform = 'translateY(' + (scrolled * 0.35) + 'px)';
-          if (heroGrid) heroGrid.style.transform = 'translateY(' + (scrolled * 0.15) + 'px)';
+          if (heroGrid) heroGrid.style.transform = 'translateY(' + (scrolled * 0.15) + 'px) rotate(' + (scrolled * 0.02) + 'deg)';
+        }, { passive: true });
+      }
+      // Orbit rotation on scroll
+      var orbitItems = document.querySelectorAll('.orbit-item');
+      var orbitContainer = document.querySelector('.orbit-container');
+      if (orbitContainer) {
+        window.addEventListener('scroll', function () {
+          var scrolled = window.scrollY;
+          var rotation = scrolled * 0.3;
+          orbitItems.forEach(function (item, i) {
+            var baseAngle = i * 90;
+            var angle = baseAngle + rotation;
+            var rad = angle * Math.PI / 180;
+            var x = Math.cos(rad) * 110;
+            var y = Math.sin(rad) * 110;
+            item.style.transform = 'translate(-50%, -50%) translate(' + x + 'px, ' + y + 'px) rotate(' + (-rotation) + 'deg)';
+          });
         }, { passive: true });
       }
       // IntersectionObserver for reveal animations
@@ -488,6 +618,34 @@
       document.querySelectorAll('.stagger').forEach(function (el) {
         observer.observe(el);
       });
+      // Scrollytelling: switch frames based on scroll position
+      var scrolly = document.querySelector('.scrolly');
+      if (scrolly) {
+        var frames = scrolly.querySelectorAll('.scrolly-frame');
+        var dots = scrolly.querySelectorAll('.scrolly-progress .dot');
+        function updateFrame() {
+          var rect = scrolly.getBoundingClientRect();
+          var scrollProgress = -rect.top / (rect.height - window.innerHeight);
+          scrollProgress = Math.max(0, Math.min(1, scrollProgress));
+          var frameIndex = Math.min(frames.length - 1, Math.floor(scrollProgress * frames.length));
+          frames.forEach(function (f, i) {
+            if (i === frameIndex) {
+              f.classList.add('active');
+            } else {
+              f.classList.remove('active');
+            }
+          });
+          dots.forEach(function (d, i) {
+            if (i === frameIndex) {
+              d.classList.add('active');
+            } else {
+              d.classList.remove('active');
+            }
+          });
+        }
+        window.addEventListener('scroll', updateFrame, { passive: true });
+        updateFrame();
+      }
       // Demo video: play once on scroll into view
       var v = document.getElementById('demo-video');
       if (v) {
