@@ -11,7 +11,8 @@ when started. Updated 2026-10-30.
   root cause (no SSE) fixed along with tool-call wiring, chunk budgets,
   reseed + compaction-append, adopt-first, honest abandon/recover. 2026-10-31
   follow-up: Lexical bulk insert via CDP Input.insertText (SendKeys and
-  execCommand both wrong for this editor), redeployed.
+  execCommand both wrong for this editor), -max-chars 500000 mirroring
+  gemini (205KB tool catalog exceeds the 200KB default), redeployed.
 - [ ] **DeepSeek tool-call crash fix** (goal `deepseek-toolcrash-fix`,
   running) — reproduce on current build, fix at verified root, owner
   integrates (commit/push/deploy).
