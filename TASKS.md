@@ -11,7 +11,8 @@ when started. Updated 2026-10-30.
   each adapter with live smoke.
 
 - [x] **meta.ai bridge** (HARDENED + REDEPLOYED 2026-10-31) — adapter on
-  8791, Chrome on CDP 9224, `meta-web` registered. Streamed turn verified:
+  8791, Chrome self-launched by the adapter on CDP 9224 (launchd job removed:
+  KeepAlive reopened the window against the user), `meta-web` registered. Streamed turn verified:
   role→content→finish_reason:stop→DONE, single submit, 14.6s. Retry-storm
   root cause (no SSE) fixed along with tool-call wiring, chunk budgets,
   reseed + compaction-append, adopt-first, honest abandon/recover. 2026-10-31
