@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 — npm homepage points to landing page
+
+- Set package `homepage` to the deployed landing page so npm links there instead of the repo README.
+
 ## Unreleased
 
 - Add Node-compatible `npx @bojackduy/opencode-web-bridges install` launcher with v1/v2 host detection, explicit config/host selection and a no-side-effects dry-run.

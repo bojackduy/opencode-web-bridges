@@ -1,8 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@bojackduy/opencode-web-bridges",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OpenCode browser bridges: managed ChatGPT and optional local-built Gemini, with provider and MCP registration for v1 and v2.",
+  "homepage": "https://bojackduy.github.io/opencode-web-bridges/",
   "type": "module",
   "license": "AGPL-3.0-or-later",
   "private": false,
